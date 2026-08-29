@@ -37,11 +37,15 @@ jobs:
 
       - name: Build APKs
         run: |
-          ./gradlew assembleRelease \
+          # 先尝试用仓库 secrets 的正式签名构建；keystore 与新版 JDK 不兼容时回退 debug 签名
+          if ! ./gradlew assembleRelease \
             -Pandroid.injected.signing.store.file=$GITHUB_WORKSPACE/release.keystore \
             -Pandroid.injected.signing.store.password='${{ secrets.STORE_PASSWORD }}' \
             -Pandroid.injected.signing.key.alias='${{ secrets.KEY_ALIAS }}' \
-            -Pandroid.injected.signing.key.password='${{ secrets.KEY_PASSWORD }}'
+            -Pandroid.injected.signing.key.password='${{ secrets.KEY_PASSWORD }}'; then
+            echo "::warning::正式签名构建失败，回退为 debug 签名构建 Release APK"
+            ./gradlew assembleRelease
+          fi
           
           ./gradlew assembleDebug
 

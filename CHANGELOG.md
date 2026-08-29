@@ -1,5 +1,7 @@
 # v3.0.0_Alpha-07
 
+<!-- retrigger -->
+
 - 新增工具箱「网络守护」：WiFi 断网自动检测与重连，专治"已连接但上不了网"的假连接
 - 专业检测引擎（可组合）：HTTP 204 双端点探测（绑定 WiFi 网络防蜂窝回落误判）/ DNS 解析探测 / ICMP ping（Shizuku/Root 特权通道，绑定 wlan0 探测固定 IP）/ 系统能力位
 - 五级自愈策略（由轻到重，逐级升压探测恢复即停）：重协商 → 断开重连 → 禁用再启用网络 → cmd wifi connect-network 定向重连 → WiFi 总开关
