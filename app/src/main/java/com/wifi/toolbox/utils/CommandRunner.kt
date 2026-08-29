@@ -15,6 +15,15 @@ object CommandRunner {
         val exitCode: Int
     )
 
+    /** 带执行通道标识的命令结果（Shizuku / RootAIDL / Shell 本地） */
+    data class ShellOutcome(
+        val output: String,
+        val exitCode: Int,
+        val channel: String
+    ) {
+        fun asResult() = CommandResult(output, exitCode)
+    }
+
     /**
      * 执行命令，可选择是否以 Root 模式执行
      *

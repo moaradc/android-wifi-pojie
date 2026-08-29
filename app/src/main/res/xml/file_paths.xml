@@ -2,4 +2,5 @@
 <paths>
     <files-path name="pojieres" path="pojieres/" />
     <cache-path name="shared_res" path="shared_res/" />
+    <external-files-path name="guard_logs" path="guard_logs/" />
 </paths>

@@ -92,6 +92,12 @@ data class GuardSettings(
     val showPersistentNotification: Boolean = SHOW_PERSISTENT_NOTIFICATION_DEFAULT,
 
     /**
+     * 记录成功检测日志：开启后每轮在线检测都写入实时日志（便于确认守护在正常跑），
+     * 关闭则仅记录异常与自愈事件（日志更清爽）
+     */
+    val verboseLog: Boolean = VERBOSE_LOG_DEFAULT,
+
+    /**
      * 自愈执行通道：
      * 0 = 自动（Shizuku 可用选 Shizuku，否则 Root AIDL，最后系统 API）
      * 1 = 仅 Shizuku
@@ -120,6 +126,7 @@ data class GuardSettings(
         const val NOTIFY_ON_HEAL_KEY = "guard_notify_on_heal"
         const val NOTIFY_ON_HEAL_FAIL_KEY = "guard_notify_on_heal_fail"
         const val SHOW_PERSISTENT_NOTIFICATION_KEY = "guard_show_persistent_notification"
+        const val VERBOSE_LOG_KEY = "guard_verbose_log"
         const val HEAL_CHANNEL_KEY = "guard_heal_channel"
         const val START_ON_BOOT_KEY = "guard_start_on_boot"
 
@@ -139,6 +146,7 @@ data class GuardSettings(
         const val NOTIFY_ON_HEAL_DEFAULT = true
         const val NOTIFY_ON_HEAL_FAIL_DEFAULT = true
         const val SHOW_PERSISTENT_NOTIFICATION_DEFAULT = true
+        const val VERBOSE_LOG_DEFAULT = true
         const val HEAL_CHANNEL_DEFAULT = 0
         const val START_ON_BOOT_DEFAULT = false
 
@@ -189,6 +197,7 @@ data class GuardSettings(
                 showPersistentNotification = prefs.getBoolean(
                     SHOW_PERSISTENT_NOTIFICATION_KEY, SHOW_PERSISTENT_NOTIFICATION_DEFAULT
                 ),
+                verboseLog = prefs.getBoolean(VERBOSE_LOG_KEY, VERBOSE_LOG_DEFAULT),
                 healChannel = prefs.getInt(HEAL_CHANNEL_KEY, HEAL_CHANNEL_DEFAULT),
                 startOnBoot = prefs.getBoolean(START_ON_BOOT_KEY, START_ON_BOOT_DEFAULT)
             )

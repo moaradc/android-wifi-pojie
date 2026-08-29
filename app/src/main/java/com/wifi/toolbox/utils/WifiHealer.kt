@@ -5,6 +5,8 @@ import android.content.pm.PackageManager
 import android.net.wifi.WifiManager
 import android.os.Build
 import com.wifi.toolbox.ToolboxApp
+import com.wifi.toolbox.R
+import com.wifi.toolbox.services.GuardState
 import com.wifi.toolbox.structs.GuardSettings
 import kotlinx.coroutines.delay
 import rikka.shizuku.Shizuku
@@ -21,6 +23,14 @@ object HealActions {
     const val DISABLE_ENABLE = "disable+enable"
     const val CMD_CONNECT = "cmd connect"
     const val WIFI_CYCLE = "wifi cycle"
+}
+
+/** 特权执行通道名（日志/状态展示用，与设置项对应） */
+object GuardChannels {
+    const val SHIZUKU = "Shizuku"
+    const val ROOT_AIDL = "RootAIDL"
+    const val API = "API"
+    const val SHELL = "Shell"
 }
 
 /**
@@ -46,24 +56,32 @@ class WifiHealer(
     private val app: ToolboxApp?
 ) {
 
-    /** 当前可用的 shell 执行通道（供 ICMP 探测复用）：Shizuku → Root AIDL → 本地 sh */
-    suspend fun shellExec(command: String): CommandRunner.CommandResult {
-        val a = app ?: return CommandRunner.CommandResult("", -1)
-        return try {
+    /**
+     * 当前可用的 shell 执行通道（供 ICMP 探测复用）：Shizuku → Root AIDL → 本地 sh。
+     * 返回 [CommandRunner.ShellOutcome]，携带实际使用的通道名（写入全局状态供 UI 展示，
+     * 解决"已授权 Shizuku 但不知道是否真的被使用"的可见性问题）。
+     */
+    suspend fun shellExec(command: String): CommandRunner.ShellOutcome {
+        val a = app ?: return CommandRunner.ShellOutcome("", -1, GuardChannels.SHELL)
+        val outcome: CommandRunner.ShellOutcome = try {
             if (isShizukuAvailable()) {
-                ShizukuUtil.executeCommandSync(command)
+                val r = ShizukuUtil.executeCommandSync(command)
+                CommandRunner.ShellOutcome(r.output, r.exitCode, GuardChannels.SHIZUKU)
             } else if (a.aidl.ipc != null) {
-                AidlServiceHelper.executeCommandSync(a, command)
+                val r = AidlServiceHelper.executeCommandSync(a, command)
+                CommandRunner.ShellOutcome(r.output, r.exitCode, GuardChannels.ROOT_AIDL)
             } else {
                 val process = ProcessBuilder("sh", "-c", command)
                     .redirectErrorStream(true).start()
                 val out = process.inputStream.bufferedReader().readText()
                 process.waitFor()
-                CommandRunner.CommandResult(out, process.exitValue())
+                CommandRunner.ShellOutcome(out, process.exitValue(), GuardChannels.SHELL)
             }
         } catch (_: Exception) {
-            CommandRunner.CommandResult("", -1)
+            CommandRunner.ShellOutcome("", -1, GuardChannels.SHELL)
         }
+        GuardState.lastShellChannel = outcome.channel
+        return outcome
     }
 
     /**
@@ -86,11 +104,18 @@ class WifiHealer(
             val ok = try {
                 executeAction(action, ssid, netId, log)
             } catch (e: Exception) {
-                log("动作 $action 异常: ${e.message}")
+                log(context.getString(R.string.guard_log_action_error, action, e.message ?: ""))
                 false
             }
             executed += action
-            log("动作 $action ${if (ok) "已执行" else "通道失败"} (${System.currentTimeMillis() - start}ms)")
+            // 动作日志携带实际执行通道（runPrivileged 执行时写入 GuardState.lastHealChannel）
+            val channel = GuardState.lastHealChannel.ifEmpty { "-" }
+            log(
+                context.getString(
+                    if (ok) R.string.guard_log_action_ok else R.string.guard_log_action_fail,
+                    action, channel, System.currentTimeMillis() - start
+                )
+            )
             if (!ok) continue // 通道失败（如该版本无此命令），直接升下一级
 
             // 动作成功发出后等待网络生效再验证
@@ -104,7 +129,7 @@ class WifiHealer(
                 }
             }
             if (recovered) {
-                log("探测恢复，停止升压")
+                log(context.getString(R.string.guard_log_recovered_stop))
                 break
             }
         }
@@ -222,6 +247,7 @@ class WifiHealer(
     /**
      * 按设置的通道（自动/Shizuku/RootAIDL/系统API）执行动作。
      * 自动模式：Shizuku 优先 → Root AIDL → 系统 API 逐级回退。
+     * 实际选中的通道写入 [GuardState.lastHealChannel]（UI 与日志可见）。
      */
     private suspend fun runPrivileged(
         shizuku: suspend () -> Boolean,
@@ -231,13 +257,29 @@ class WifiHealer(
         val channel = app?.guardHealChannel() ?: 0
         return try {
             when (channel) {
-                1 -> if (isShizukuAvailable()) shizuku() else false
-                2 -> if (app?.aidl?.ipc != null) aidl() else false
-                3 -> api()
+                1 -> if (isShizukuAvailable()) {
+                    GuardState.lastHealChannel = GuardChannels.SHIZUKU
+                    shizuku()
+                } else false
+                2 -> if (app?.aidl?.ipc != null) {
+                    GuardState.lastHealChannel = GuardChannels.ROOT_AIDL
+                    aidl()
+                } else false
+                3 -> {
+                    GuardState.lastHealChannel = GuardChannels.API
+                    api()
+                }
                 else -> {
-                    if (isShizukuAvailable()) shizuku()
-                    else if (app?.aidl?.ipc != null) aidl()
-                    else api()
+                    if (isShizukuAvailable()) {
+                        GuardState.lastHealChannel = GuardChannels.SHIZUKU
+                        shizuku()
+                    } else if (app?.aidl?.ipc != null) {
+                        GuardState.lastHealChannel = GuardChannels.ROOT_AIDL
+                        aidl()
+                    } else {
+                        GuardState.lastHealChannel = GuardChannels.API
+                        api()
+                    }
                 }
             }
         } catch (e: Exception) {

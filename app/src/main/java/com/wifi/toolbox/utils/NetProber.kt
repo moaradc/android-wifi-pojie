@@ -11,6 +11,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withTimeoutOrNull
 import java.net.HttpURLConnection
+import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.URL
 
@@ -43,7 +44,7 @@ data class ProbeVerdict(
  * 四种可插拔策略（[GuardSettings.probeModes] 位掩码组合）：
  * - HTTP 204   AOSP 标准探测（与系统 NetworkMonitor 同源），双端点互备
  * - DNS        检测运营商 DNS 黑洞/劫持（204 通但 DNS 死的疑难场景）
- * - ICMP       依赖 Shizuku/root shell 的 ping -I wlan0（应用层全挂时的仲裁手段）
+ * - ICMP       特权 shell ping（源 IP 绑定 WiFi 接口，应用层全挂时的仲裁手段）
  * - VALIDATED  系统 NET_CAPABILITY_VALIDATED 能力位（最近一次系统验证结论，零开销）
  */
 object NetProber {
@@ -57,7 +58,10 @@ object NetProber {
     // DNS 探测域名：境外公共域 + 境内可解析域，避免单点故障误判
     private val DNS_TARGETS = listOf("www.google.com", "www.baidu.com")
 
-    private const val ICMP_TARGET = "204.2.134.20" // gstatic.com 固定 IP，避免 DNS 干扰 ICMP 判定
+    // ICMP 探测目标：公共 DNS 任播 IP，长期稳定回应 ICMP，境内外均可直达
+    // （阿里 DNS / 腾讯 DNSPod 任播，不依赖任何单一运营商）
+    private const val ICMP_PRIMARY = "223.5.5.5"
+    private const val ICMP_BACKUP = "119.29.29.29"
     private const val ICMP_TIMEOUT = 3
 
     /**
@@ -66,7 +70,7 @@ object NetProber {
     suspend fun probe(
         context: Context,
         settings: GuardSettings,
-        shellExecutor: suspend (String) -> CommandRunner.CommandResult
+        shellExecutor: suspend (String) -> CommandRunner.ShellOutcome
     ): ProbeVerdict = coroutineScope {
         val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         val wifiNetwork = findWifiNetwork(cm)
@@ -87,7 +91,7 @@ object NetProber {
             jobs += async { probeDns(wifiNetwork, settings.probeTimeoutMs) }
         }
         if (modes and GuardSettings.PROBE_ICMP != 0) {
-            jobs += async { probeIcmp(shellExecutor) }
+            jobs += async { probeIcmp(cm, wifiNetwork, shellExecutor) }
         }
         if (modes and GuardSettings.PROBE_VALIDATED != 0 && capabilities != null) {
             jobs += async { probeValidated(capabilities) }
@@ -202,21 +206,106 @@ object NetProber {
         } ?: ProbeResult("DNS", false, "timeout")
 
     /**
-     * ICMP 探测：通过特权 shell 执行 ping，并强制绑定 wlan0 接口。
-     * 探测固定 IP，绕过 DNS 环节，是"域名全挂但裸 IP 通"类故障的仲裁手段。
+     * ICMP 探测：通过特权 shell 执行 ping。
+     *
+     * 绑定方式的正确性关键（修复 "ICMP 永远 exit=2" 的真机反馈）：
+     * - 旧实现 `ping -I wlan0` 走 SO_BINDTODEVICE，该套接字选项需要 CAP_NET_RAW
+     *   特权能力；Shizuku 的 shell(uid 2000) 与应用进程都没有此能力，
+     *   内核 <5.6 直接返回 EPERM，iputils 以 error(2) 退出 —— 即恒定 exit=2。
+     * - 现改用 **源 IP 绑定**（`ping -I <WiFi 接口 IPv4>`）：底层是普通 bind()，
+     *   无需任何特权；内核按源地址强制选择 wlan 路由，同样能防止探测回落蜂窝。
+     * - 源 IP 不可用时回退接口名绑定（内核 ≥5.6 或真 root 下可用），
+     *   再不可用才回退不绑定（detail 中如实标注）。
+     * - 目标改为公共 DNS 任播 IP（阿里/腾讯），而非境外单点，保证境内可靠回应。
+     * - 探测失败时输出 ping 的真实报错行（不再只给 "exit=2"），便于定位。
      */
-    private suspend fun probeIcmp(shellExecutor: suspend (String) -> CommandRunner.CommandResult): ProbeResult {
+    private suspend fun probeIcmp(
+        cm: ConnectivityManager,
+        wifiNetwork: Network?,
+        shellExecutor: suspend (String) -> CommandRunner.ShellOutcome
+    ): ProbeResult {
         return try {
-            val cmd = "ping -c 1 -W $ICMP_TIMEOUT -I wlan0 $ICMP_TARGET"
-            val result = shellExecutor(cmd)
-            val ok = result.exitCode == 0
-            val detail = result.output.lineSequence()
-                .firstOrNull { it.contains("time=") || it.contains("ttl=") }
-                ?.trim() ?: "exit=${result.exitCode}"
-            ProbeResult("ICMP", ok, detail)
+            // 应用层免权限读取 WiFi 接口信息（接口名 + IPv4 源地址）
+            var srcIp: String? = null
+            var iface: String? = null
+            if (wifiNetwork != null) {
+                try {
+                    val lp = cm.getLinkProperties(wifiNetwork)
+                    iface = lp?.interfaceName
+                    srcIp = lp?.linkAddresses
+                        ?.firstOrNull {
+                            it.address is Inet4Address && !it.address.isLoopbackAddress
+                        }?.address?.hostAddress
+                } catch (_: Exception) {
+                }
+            }
+
+            // 绑定优先级：源IP(免特权) > 接口名(需CAP_NET_RAW) > 不绑定
+            val bindValue: String? = srcIp ?: iface
+            var target = ICMP_PRIMARY
+            var unboundUsed = false
+            var outcome = runPing(shellExecutor, bindValue, target)
+
+            if (outcome.exitCode != 0 && isBindRejected(outcome.output)) {
+                // 绑定方式被系统拒绝（权限/能力位/接口不存在）→ 降级为不绑定重试
+                unboundUsed = true
+                outcome = runPing(shellExecutor, null, target, unbound = true)
+            } else if (outcome.exitCode == 1) {
+                // ping 本身工作正常但无应答：换备用任播目标再试一次，排除单点不回应
+                target = ICMP_BACKUP
+                outcome = runPing(shellExecutor, bindValue, target)
+            }
+
+            val detail = if (outcome.exitCode == 0) {
+                val rtt = Regex("time=[0-9.]+ ?ms").find(outcome.output)?.value
+                    ?: outcome.output.lineSequence()
+                        .firstOrNull { it.contains("ttl=") }?.trim() ?: "ok"
+                val bindNote = if (unboundUsed) " (unbound)" else ""
+                "$target $rtt$bindNote"
+            } else {
+                // 失败时展示 ping 的真实报错行，不再只给 "exit=2" 无法定位
+                val err = firstErrorLine(outcome.output)
+                if (err.isNullOrEmpty()) "exit=${outcome.exitCode}" else err
+            }
+            ProbeResult("ICMP", outcome.exitCode == 0, "$detail [${outcome.channel}]")
         } catch (e: Exception) {
             ProbeResult("ICMP", false, e.javaClass.simpleName)
         }
+    }
+
+    /** 执行一次 ping；unbound=true 时不绑定任何接口（保底手段） */
+    private suspend fun runPing(
+        shellExecutor: suspend (String) -> CommandRunner.ShellOutcome,
+        bindValue: String?,
+        target: String,
+        unbound: Boolean = false
+    ): CommandRunner.ShellOutcome {
+        val cmd = buildString {
+            append("ping -c 1 -W $ICMP_TIMEOUT")
+            if (!unbound && bindValue != null) append(" -I $bindValue")
+            append(" $target")
+        }
+        return shellExecutor(cmd)
+    }
+
+    /** ping 输出中第一条真实报错行（过滤 PING 头与统计行） */
+    private fun firstErrorLine(output: String): String? {
+        return output.lineSequence()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .firstOrNull { line ->
+                !line.startsWith("PING ") && !line.startsWith("--- ")
+            }
+    }
+
+    /** 判断失败是否为绑定方式被拒绝（权限/能力位/接口不存在），可安全降级重试 */
+    private fun isBindRejected(output: String): Boolean {
+        val low = output.lowercase()
+        return low.contains("operation not permitted") ||
+                low.contains("so_bindtodevice") ||
+                low.contains("unknown iface") ||
+                low.contains("no such device") ||
+                low.contains("cannot assign requested address")
     }
 
     /** 系统能力位探测：NET_CAPABILITY_VALIDATED 表示系统最近一次验证通过 */

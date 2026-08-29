@@ -1,5 +1,10 @@
 package com.wifi.toolbox.ui.screen
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import android.widget.Toast
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
@@ -20,8 +25,11 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.content.FileProvider
 import com.wifi.toolbox.R
 import com.wifi.toolbox.ToolboxApp
+import com.wifi.toolbox.services.GuardLog
+import com.wifi.toolbox.services.GuardLogEntry
 import com.wifi.toolbox.services.GuardService
 import com.wifi.toolbox.services.GuardState
 import com.wifi.toolbox.structs.GuardSettings
@@ -29,9 +37,15 @@ import com.wifi.toolbox.ui.items.BannerTip
 import com.wifi.toolbox.ui.items.NavContainer
 import com.wifi.toolbox.ui.items.NavPage
 import com.wifi.toolbox.utils.GuardStats
+import com.wifi.toolbox.utils.WifiHealer
 import com.wifi.toolbox.utils.rememberGuardSettings
 import me.zhanghai.compose.preference.*
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.delay
 
 /**
  * 网络守护入口页：WiFi 断网自动检测与重连
@@ -59,7 +73,7 @@ fun GuardScreen(onMenuClick: () -> Unit) {
                 override val selectedIcon = Icons.Filled.Tune
                 override val unselectedIcon = Icons.Outlined.Tune
                 override val content = @Composable {
-                    GuardSettingsPage(settings)
+                    GuardSettingsPage(settings, app)
                 }
             },
             object : NavPage {
@@ -91,6 +105,16 @@ private fun StatusPage(settings: GuardSettings, app: ToolboxApp?) {
     val state = GuardState.currentState
     val lastCheck = GuardState.lastCheckTime
     val lastVerdict = GuardState.lastVerdict
+
+    // 1 秒滴答：驱动"上次检测 X 秒前"实时刷新
+    // （原实现只在检测轮次写入 lastCheckTime 时重组，页面上的秒数会冻住不动）
+    var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1000)
+            nowMs = System.currentTimeMillis()
+        }
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -161,7 +185,7 @@ private fun StatusPage(settings: GuardSettings, app: ToolboxApp?) {
                         color = color
                     )
                     if (lastCheck > 0) {
-                        val ago = (System.currentTimeMillis() - lastCheck) / 1000
+                        val ago = (nowMs - lastCheck) / 1000
                         Text(
                             text = stringResource(
                                 R.string.guard_last_check,
@@ -171,6 +195,24 @@ private fun StatusPage(settings: GuardSettings, app: ToolboxApp?) {
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
+
+                    // ---- 通道可见性：解决"已授权但不知道是否真的在用" ----
+                    val shellChannel = GuardState.lastShellChannel
+                    val healChannel = GuardState.lastHealChannel
+                    if (shellChannel.isNotEmpty() || healChannel.isNotEmpty()) {
+                        val parts = buildList {
+                            if (shellChannel.isNotEmpty()) add(shellChannel)
+                            if (healChannel.isNotEmpty()) add(healChannel)
+                        }
+                        Text(
+                            text = stringResource(
+                                R.string.guard_channel_current, parts.joinToString(" / ")
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
                     lastVerdict?.let { v ->
                         Spacer(Modifier.height(8.dp))
                         v.results.forEach { r ->
@@ -222,38 +264,8 @@ private fun StatusPage(settings: GuardSettings, app: ToolboxApp?) {
         }
 
         item {
-            // ---- 实时日志 ----
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 4.dp)
-            ) {
-                Column(Modifier.padding(12.dp)) {
-                    Text(
-                        stringResource(R.string.guard_live_log),
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    val logs = GuardState.logList()
-                    if (logs.isEmpty()) {
-                        Text(
-                            stringResource(R.string.guard_no_log),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    } else {
-                        logs.takeLast(50).forEach { line ->
-                            Text(
-                                line,
-                                style = MaterialTheme.typography.bodySmall,
-                                fontFamily = FontFamily.Monospace,
-                                modifier = Modifier.padding(vertical = 1.dp)
-                            )
-                        }
-                    }
-                }
-            }
+            // ---- 实时日志（复制/清空/保存/导出/管理/筛选） ----
+            LiveLogCard(context)
         }
     }
 }
@@ -286,10 +298,359 @@ private fun formatAgo(seconds: Long): String {
     }
 }
 
+// ==================== 实时日志卡片 ====================
+
+/** 日志筛选模式 */
+private const val LOG_FILTER_ALL = 0
+private const val LOG_FILTER_ERROR = 1
+private const val LOG_FILTER_HEAL = 2
+
+/** 守护日志保存目录（应用外部私有目录，免存储权限，可被文件管理器访问） */
+private fun guardLogDir(context: Context): File =
+    File(context.getExternalFilesDir(null), "guard_logs").apply { mkdirs() }
+
+/** 单条日志的可复制文本 */
+private fun formatEntry(entry: GuardLogEntry): String =
+    "[${GuardLog.formatTime(entry.time)}] ${entry.msg}"
+
+/**
+ * 实时日志卡片：
+ * - 工具行：复制 / 清空 / 保存 / 导出(分享) / 管理(已保存列表)
+ * - 筛选：全部 / 仅异常 / 仅自愈
+ * - 按级别着色展示（最近 50 条）
+ */
+@Composable
+private fun LiveLogCard(context: Context) {
+    val logs = GuardState.logList()
+    var filter by rememberSaveable { mutableIntStateOf(LOG_FILTER_ALL) }
+    var showManage by remember { mutableStateOf(false) }
+    var toastMsg by remember { mutableStateOf<String?>(null) }
+    val dir = remember(context) { guardLogDir(context) }
+
+    fun toast(msg: String) {
+        toastMsg = msg
+    }
+
+    // Toast 用本地状态驱动，避免在组合期间直接调副作用
+    LaunchedEffect(toastMsg) {
+        toastMsg?.let {
+            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+            toastMsg = null
+        }
+    }
+
+    /** 当前筛选下要操作的日志文本（点击时实时读取，避免闭包过期） */
+    fun visibleEntries(): List<GuardLogEntry> {
+        val all = GuardState.logList()
+        return when (filter) {
+            LOG_FILTER_ERROR -> all.filter {
+                it.level == GuardLog.LEVEL_ERROR || it.level == GuardLog.LEVEL_WARN
+            }
+            LOG_FILTER_HEAL -> all.filter { it.level == GuardLog.LEVEL_HEAL }
+            else -> all
+        }
+    }
+
+    fun entriesToText(entries: List<GuardLogEntry>): String {
+        if (entries.isEmpty()) return ""
+        val head = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+            .format(Date())
+        return buildString {
+            appendLine(context.getString(R.string.guard_log_file_header))
+            appendLine(context.getString(R.string.guard_log_file_exported_at, head))
+            appendLine("--------")
+            entries.forEach { appendLine(formatEntry(it)) }
+        }
+    }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp)
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            // ---- 标题 + 操作按钮行 ----
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    stringResource(R.string.guard_live_log),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f)
+                )
+                IconButton(
+                    onClick = {
+                        val entries = visibleEntries()
+                        if (entries.isEmpty()) return@IconButton
+                        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE)
+                                as ClipboardManager
+                        cm.setPrimaryClip(
+                            ClipData.newPlainText(
+                                "guard_log", entries.joinToString("\n") { formatEntry(it) }
+                            )
+                        )
+                        toast(context.getString(R.string.guard_log_copied, entries.size))
+                    },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        Icons.Outlined.ContentCopy,
+                        stringResource(R.string.guard_log_copy_desc),
+                        Modifier.size(17.dp)
+                    )
+                }
+                IconButton(
+                    onClick = {
+                        val entries = visibleEntries()
+                        val file = writeGuardLogFile(dir, entriesToText(entries))
+                        toast(
+                            if (file != null) context.getString(
+                                R.string.guard_log_saved, file.name
+                            )
+                            else context.getString(R.string.guard_log_save_fail)
+                        )
+                    },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        Icons.Outlined.Save,
+                        stringResource(R.string.guard_log_save_desc),
+                        Modifier.size(17.dp)
+                    )
+                }
+                IconButton(
+                    onClick = {
+                        val file = writeGuardLogFile(dir, entriesToText(visibleEntries()))
+                        if (file != null) shareLogFile(context, file)
+                        else toast(context.getString(R.string.guard_log_save_fail))
+                    },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        Icons.Outlined.IosShare,
+                        stringResource(R.string.guard_log_export_desc),
+                        Modifier.size(17.dp)
+                    )
+                }
+                IconButton(
+                    onClick = { showManage = true },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        Icons.Outlined.FolderOpen,
+                        stringResource(R.string.guard_log_manage_desc),
+                        Modifier.size(17.dp)
+                    )
+                }
+                IconButton(
+                    onClick = {
+                        GuardState.clearLogs()
+                        toast(context.getString(R.string.guard_log_cleared))
+                    },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        Icons.Outlined.DeleteSweep,
+                        stringResource(R.string.guard_log_clear_desc),
+                        Modifier.size(17.dp)
+                    )
+                }
+            }
+
+            // ---- 筛选行 ----
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.padding(top = 4.dp)
+            ) {
+                FilterChip(
+                    selected = filter == LOG_FILTER_ALL,
+                    onClick = { filter = LOG_FILTER_ALL },
+                    label = { Text(stringResource(R.string.guard_log_filter_all)) }
+                )
+                FilterChip(
+                    selected = filter == LOG_FILTER_ERROR,
+                    onClick = { filter = LOG_FILTER_ERROR },
+                    label = { Text(stringResource(R.string.guard_log_filter_error)) }
+                )
+                FilterChip(
+                    selected = filter == LOG_FILTER_HEAL,
+                    onClick = { filter = LOG_FILTER_HEAL },
+                    label = { Text(stringResource(R.string.guard_log_filter_heal)) }
+                )
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            // ---- 日志正文 ----
+            val filtered = when (filter) {
+                LOG_FILTER_ERROR -> logs.filter {
+                    it.level == GuardLog.LEVEL_ERROR || it.level == GuardLog.LEVEL_WARN
+                }
+                LOG_FILTER_HEAL -> logs.filter { it.level == GuardLog.LEVEL_HEAL }
+                else -> logs
+            }
+            if (filtered.isEmpty()) {
+                Text(
+                    stringResource(R.string.guard_no_log),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                filtered.takeLast(50).forEach { entry ->
+                    Text(
+                        formatEntry(entry),
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = logLevelColor(entry.level),
+                        modifier = Modifier.padding(vertical = 1.dp)
+                    )
+                }
+            }
+        }
+    }
+
+    if (showManage) {
+        SavedLogsDialog(context = context, dir = dir, onDismiss = { showManage = false })
+    }
+}
+
+/** 日志级别 → 颜色 */
+@Composable
+private fun logLevelColor(level: Int): Color {
+    return when (level) {
+        GuardLog.LEVEL_ERROR -> MaterialTheme.colorScheme.error
+        GuardLog.LEVEL_HEAL -> MaterialTheme.colorScheme.tertiary
+        GuardLog.LEVEL_WARN -> MaterialTheme.colorScheme.secondary
+        else -> Color.Unspecified
+    }
+}
+
+/** 生成日志文件（时间戳命名，避免覆盖） */
+private fun writeGuardLogFile(dir: File, content: String): File? {
+    if (content.isEmpty()) return null
+    return try {
+        val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.getDefault()).format(Date())
+        val file = File(dir, "guard-$stamp.log")
+        file.writeText(content)
+        file
+    } catch (_: Exception) {
+        null
+    }
+}
+
+/** 通过 FileProvider 分享日志文件（系统分享面板） */
+private fun shareLogFile(context: Context, file: File) {
+    try {
+        val uri = FileProvider.getUriForFile(
+            context, "${context.packageName}.fileprovider", file
+        )
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(Intent.createChooser(intent, null))
+    } catch (_: Exception) {
+    }
+}
+
+/**
+ * 已保存日志管理对话框：列出全部日志文件（时间倒序），
+ * 支持单个分享 / 单个删除 / 全部清空。
+ */
+@Composable
+private fun SavedLogsDialog(context: Context, dir: File, onDismiss: () -> Unit) {
+    var version by remember { mutableIntStateOf(0) }
+    val files = remember(version) {
+        dir.listFiles()?.filter { it.isFile }?.sortedByDescending { it.lastModified() }
+            ?: emptyList()
+    }
+    val fmt = remember { SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.guard_log_manage)) },
+        text = {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 400.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                if (files.isEmpty()) {
+                    Text(
+                        stringResource(R.string.guard_log_manage_empty),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    files.forEach { f ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    f.name,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                Text(
+                                    "${f.length() / 1024}KB · ${fmt.format(Date(f.lastModified()))}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            IconButton(
+                                onClick = { shareLogFile(context, f) },
+                                modifier = Modifier.size(34.dp)
+                            ) {
+                                Icon(
+                                    Icons.Outlined.Share,
+                                    stringResource(R.string.guard_log_share_desc),
+                                    Modifier.size(17.dp)
+                                )
+                            }
+                            IconButton(
+                                onClick = {
+                                    f.delete()
+                                    version++
+                                },
+                                modifier = Modifier.size(34.dp)
+                            ) {
+                                Icon(
+                                    Icons.Outlined.Delete,
+                                    stringResource(R.string.guard_log_delete_desc),
+                                    Modifier.size(17.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            if (files.isNotEmpty()) {
+                TextButton(onClick = {
+                    files.forEach { it.delete() }
+                    version++
+                }) { Text(stringResource(R.string.guard_log_delete_all)) }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.btn_close)) }
+        }
+    )
+}
+
 // ==================== 设置页 ====================
 
 @Composable
-private fun GuardSettingsPage(settings: MutableState<GuardSettings>) {
+private fun GuardSettingsPage(settings: MutableState<GuardSettings>, app: ToolboxApp?) {
     val s = settings.value
     val context = LocalContext.current
 
@@ -412,6 +773,17 @@ private fun GuardSettingsPage(settings: MutableState<GuardSettings>) {
                         settings.value = s.copy(failThreshold = v)
                     }
                 }
+            }
+            item {
+                SwitchPreference(
+                    value = s.verboseLog,
+                    onValueChange = {
+                        settings.value = s.copy(verboseLog = it)
+                    },
+                    title = { Text(stringResource(R.string.guard_verbose_log)) },
+                    summary = { Text(stringResource(R.string.guard_verbose_log_tip)) },
+                    icon = { Icon(Icons.Filled.ReceiptLong, null) }
+                )
             }
 
             // ---- 检测时机 ----
@@ -537,13 +909,33 @@ private fun GuardSettingsPage(settings: MutableState<GuardSettings>) {
                 }
             }
             item {
+                // 通道可用性检测：让用户直观看到"选的通道现在能不能用"
+                // （解决"已授权 Shizuku 但不知道是否真的被使用"的疑虑）
+                val shizukuOk = remember(s.healChannel, s.probeModes) {
+                    WifiHealer.isShizukuAvailable()
+                }
+                val aidlOk = remember(s.healChannel, s.probeModes) {
+                    try {
+                        app?.aidl?.ipc != null
+                    } catch (_: Exception) {
+                        false
+                    }
+                }
+                val availability = when {
+                    s.healChannel == 1 -> "Shizuku " + if (shizukuOk) "✓" else "✗"
+                    s.healChannel == 2 -> "RootAIDL " + if (aidlOk) "✓" else "✗"
+                    s.healChannel == 3 -> "API"
+                    shizukuOk -> "Shizuku ✓"
+                    aidlOk -> "RootAIDL ✓"
+                    else -> "API"
+                }
                 ListPreference(
                     value = s.healChannel,
                     onValueChange = {
                         settings.value = s.copy(healChannel = it)
                     },
                     title = { Text(stringResource(R.string.guard_heal_channel)) },
-                    summary = { Text(channelValues[s.healChannel]) },
+                    summary = { Text("${channelValues[s.healChannel]} · $availability") },
                     icon = { Icon(Icons.Filled.Cable, null) },
                     values = channelValues.indices.toList(),
                     valueToText = { i: Int -> AnnotatedString(channelValues[i]) },

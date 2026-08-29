@@ -132,7 +132,7 @@ class GuardService : Service() {
             try {
                 runOneCheck()
             } catch (e: Exception) {
-                log("${getString(R.string.guard_log_check_error)}: ${e.message}")
+                log("${getString(R.string.guard_log_check_error)}: ${e.message}", GuardLog.LEVEL_ERROR)
             }
             // 每轮重新读设置，支持 UI 实时改间隔（不重启服务）
             reloadSettings()
@@ -162,7 +162,7 @@ class GuardService : Service() {
             if (!connected) {
                 // 防刷屏：仅手动检测或状态切换时打日志
                 if (manual || GuardState.currentState != GuardState.STATE_LINK_DOWN) {
-                    log(getString(R.string.guard_log_wifi_not_connected))
+                    log(getString(R.string.guard_log_wifi_not_connected), GuardLog.LEVEL_WARN)
                 }
                 GuardState.lastCheckTime = System.currentTimeMillis()
                 GuardState.currentState = GuardState.STATE_LINK_DOWN
@@ -180,8 +180,10 @@ class GuardService : Service() {
         GuardState.lastVerdict = verdict
 
         if (verdict.online) {
-            if (consecutiveFails > 0 || manual) {
-                log(getString(R.string.guard_log_online, detail))
+            // verboseLog 开启时每轮在线结果都记录（用户可确认守护在跑）；
+            // 关闭时仅记录"从故障恢复"与手动检测，保持日志清爽
+            if (settings.verboseLog || consecutiveFails > 0 || manual) {
+                log(getString(R.string.guard_log_online, detail), GuardLog.LEVEL_INFO)
             }
             consecutiveFails = 0
             GuardState.currentState = GuardState.STATE_ONLINE
@@ -193,7 +195,8 @@ class GuardService : Service() {
             getString(
                 R.string.guard_log_offline_count,
                 consecutiveFails, settings.failThreshold, detail
-            )
+            ),
+            GuardLog.LEVEL_ERROR
         )
 
         // 防抖：未达阈值不动作
@@ -204,14 +207,14 @@ class GuardService : Service() {
 
         // WiFi 链路已断开：可能是用户主动断开，不重连
         if (settings.skipWhenWifiDisconnected && !verdict.wifiConnected) {
-            log(getString(R.string.guard_log_wifi_link_down))
+            log(getString(R.string.guard_log_wifi_link_down), GuardLog.LEVEL_WARN)
             GuardState.currentState = GuardState.STATE_LINK_DOWN
             return@withLock
         }
 
         // Captive Portal：重连无意义
         if (settings.skipOnCaptivePortal && verdict.portal) {
-            log(getString(R.string.guard_log_portal))
+            log(getString(R.string.guard_log_portal), GuardLog.LEVEL_WARN)
             GuardState.currentState = GuardState.STATE_PORTAL
             return@withLock
         }
@@ -274,7 +277,7 @@ class GuardService : Service() {
             val backoff = settings.healCooldownBaseSec * 1000L *
                     (1L shl minOf(consecutiveHealFails, settings.maxBackoffPower).coerceAtMost(16))
             val capped = minOf(backoff, 15 * 60 * 1000L)
-            log(getString(R.string.guard_log_backoff, capped / 1000))
+            log(getString(R.string.guard_log_backoff, capped / 1000), GuardLog.LEVEL_HEAL)
             delay(capped)
         }
 
@@ -284,7 +287,7 @@ class GuardService : Service() {
         val (ssid, netId) = wifiIdentity()
 
         GuardState.lastHealSsid = ssid
-        log(getString(R.string.guard_log_healing, ssid.ifEmpty { "?" }))
+        log(getString(R.string.guard_log_healing, ssid.ifEmpty { "?" }), GuardLog.LEVEL_HEAL)
 
         val failedProbes = verdict.results.filter { !it.ok }.joinToString(",") { it.mode }
         val start = System.currentTimeMillis()
@@ -296,7 +299,7 @@ class GuardService : Service() {
             verify = {
                 NetProber.probe(applicationContext, settings) { cmd -> healer.shellExec(cmd) }.online
             },
-            log = { log(it) }
+            log = { log(it, GuardLog.LEVEL_HEAL) }
         )
 
         // 最终验证（给最后一个动作一点生效时间）
@@ -317,14 +320,14 @@ class GuardService : Service() {
             consecutiveHealFails = 0
             consecutiveFails = 0
             GuardState.currentState = GuardState.STATE_ONLINE
-            log(getString(R.string.guard_log_heal_ok, cost / 1000))
+            log(getString(R.string.guard_log_heal_ok, cost / 1000), GuardLog.LEVEL_HEAL)
             if (settings.notifyOnHeal) {
                 notifyEvent(getString(R.string.guard_notif_healed_title, ssid), getString(R.string.guard_notif_healed_text, cost / 1000))
             }
         } else {
             consecutiveHealFails++
             GuardState.currentState = GuardState.STATE_HEAL_FAILED
-            log(getString(R.string.guard_log_heal_fail, consecutiveHealFails))
+            log(getString(R.string.guard_log_heal_fail, consecutiveHealFails), GuardLog.LEVEL_ERROR)
             if (settings.notifyOnHealFail) {
                 notifyEvent(getString(R.string.guard_notif_heal_fail_title), getString(R.string.guard_notif_heal_fail_text, ssid))
             }
@@ -405,9 +408,8 @@ class GuardService : Service() {
         manager.notify(EVENT_NOTIF_ID, notification)
     }
 
-    private fun log(msg: String) {
-        val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
-        GuardState.addLog("[$time] $msg")
+    private fun log(msg: String, level: Int = GuardLog.LEVEL_INFO) {
+        GuardState.addLog(msg, level)
     }
 
     override fun onDestroy() {
@@ -440,6 +442,28 @@ class GuardService : Service() {
 }
 
 /**
+ * 结构化日志条目：时间戳 + 级别 + 正文。
+ * 级别用于 UI 筛选（全部/仅异常/仅自愈）与着色。
+ */
+data class GuardLogEntry(
+    val time: Long,
+    val level: Int,
+    val msg: String
+)
+
+/** 日志级别 */
+object GuardLog {
+    const val LEVEL_INFO = 0     // 常规信息（含在线检测结果）
+    const val LEVEL_WARN = 1     // 跳过/豁免类
+    const val LEVEL_ERROR = 2    // 断网判定/自愈失败
+    const val LEVEL_HEAL = 3     // 自愈过程
+
+    /** 用于 UI 展示的时间格式（无年份，日志为滚动缓冲） */
+    fun formatTime(time: Long): String =
+        SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(time))
+}
+
+/**
  * 守护服务全局状态（Compose 快照流，UI 直接观察，服务重启不丢 UI 数据）
  */
 object GuardState {
@@ -455,18 +479,24 @@ object GuardState {
     var currentState by androidx.compose.runtime.mutableStateOf(STATE_IDLE)
     var lastCheckTime by androidx.compose.runtime.mutableLongStateOf(0L)
     var lastHealSsid by androidx.compose.runtime.mutableStateOf("")
+    /** 最近一次特权 shell（ICMP 探测/诊断命令）实际使用的通道 */
+    var lastShellChannel by androidx.compose.runtime.mutableStateOf("")
+    /** 最近一次自愈动作实际使用的通道 */
+    var lastHealChannel by androidx.compose.runtime.mutableStateOf("")
     var settings by androidx.compose.runtime.mutableStateOf(
         GuardSettings()
     )
     var stats: GuardStats? = null
     var lastVerdict: com.wifi.toolbox.utils.ProbeVerdict? = null
 
-    private val logs = androidx.compose.runtime.mutableStateListOf<String>()
+    private val logs = androidx.compose.runtime.mutableStateListOf<GuardLogEntry>()
 
-    fun addLog(msg: String) {
+    fun addLog(msg: String, level: Int = GuardLog.LEVEL_INFO) {
         if (logs.size >= 200) logs.removeAt(0)
-        logs.add(msg)
+        logs.add(GuardLogEntry(System.currentTimeMillis(), level, msg))
     }
 
-    fun logList(): List<String> = logs
+    fun clearLogs() = logs.clear()
+
+    fun logList(): List<GuardLogEntry> = logs
 }

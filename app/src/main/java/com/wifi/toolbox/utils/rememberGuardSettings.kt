@@ -41,6 +41,7 @@ fun rememberGuardSettings(context: Context): MutableState<GuardSettings> {
                         putBoolean(GuardSettings.NOTIFY_ON_HEAL_KEY, s.notifyOnHeal)
                         putBoolean(GuardSettings.NOTIFY_ON_HEAL_FAIL_KEY, s.notifyOnHealFail)
                         putBoolean(GuardSettings.SHOW_PERSISTENT_NOTIFICATION_KEY, s.showPersistentNotification)
+                        putBoolean(GuardSettings.VERBOSE_LOG_KEY, s.verboseLog)
                         putInt(GuardSettings.HEAL_CHANNEL_KEY, s.healChannel)
                         putBoolean(GuardSettings.START_ON_BOOT_KEY, s.startOnBoot)
                     }
