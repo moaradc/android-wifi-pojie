@@ -51,8 +51,17 @@ data class GuardSettings(
      * 2 = 标准档：disconnect + reconnect 完整重连（对付大多数假连接）
      * 3 = 强力档：逐步升压（轻量→标准→关闭再启用网络→WiFi 总开关）
      * 4 = 终极档：强力档基础上仍失败则 cmd wifi connect-network 定向重连
+     * 5 = 自定义档：用户在 [customHealActions] 中自选动作组合
+     * 6 = 高成功率档：动态选取统计中累计自愈成功最高的单一动作
      */
     val healStrategy: Int = HEAL_STRATEGY_DEFAULT,
+
+    /**
+     * 自定义档动作序列（","分隔的动作 id，如 "reassociate,disable+enable"；
+     * 动作 id 自身含"+"与空格，故用逗号分隔），按由轻到重顺序执行：
+     * 仅在 healStrategy = 5 时生效；空串回退为标准档动作
+     */
+    val customHealActions: String = CUSTOM_HEAL_ACTIONS_DEFAULT,
 
     /**
      * 重连后等待网络验证的超时（秒），超时视为本次自愈失败
@@ -69,6 +78,16 @@ data class GuardSettings(
      * 最大冷却倍数上限（backoff 上限 = cooldownBase * 2^maxBackoffPower）
      */
     val maxBackoffPower: Int = MAX_BACKOFF_POWER_DEFAULT,
+
+    /**
+     * 连续自愈次数上限（熔断阈值，参考 Circuit Breaker 模式）：
+     * 0 = 无限制（旧版行为，一直退避重试）；
+     * N = 连续 N 次自愈失败后停止自愈动作（检测继续），
+     * 直到网络恢复在线或手动“立即检测”时复位计数。
+     * 网络调研（AWS Prescriptive Guidance / ByteByteGo）：无限重试会导致
+     * 恶性循环与资源耗尽，重试机制应包含最大次数限制。
+     */
+    val healMaxAttempts: Int = HEAL_MAX_ATTEMPTS_DEFAULT,
 
     /**
      * 局域网豁免：如果 WiFi 本身已断开（非假连接），不做重连，
@@ -92,10 +111,20 @@ data class GuardSettings(
     val showPersistentNotification: Boolean = SHOW_PERSISTENT_NOTIFICATION_DEFAULT,
 
     /**
-     * 记录成功检测日志：开启后每轮在线检测都写入实时日志（便于确认守护在正常跑），
-     * 关闭则仅记录异常与自愈事件（日志更清爽）
+     * 记录哪些类型的日志到实时日志（位掩码，默认全部）：
+     * bit0 = INFO 正常（在线检测结果等）
+     * bit1 = WARN 警告（跳过/豁免类事件）
+     * bit2 = ERROR 错误（断网判定/自愈失败）
+     * bit3 = HEAL 自愈过程
+     * 取代旧版 verboseLog 布尔开关（旧值自动迁移）。
      */
-    val verboseLog: Boolean = VERBOSE_LOG_DEFAULT,
+    val logLevels: Int = LOG_LEVELS_DEFAULT,
+
+    /**
+     * 日志保存目录（SAF tree URI 字符串；空串 = 应用私有目录 filesDir/log）。
+     * 通过系统文件管理器（ACTION_OPEN_DOCUMENT_TREE）选择。
+     */
+    val logDirUri: String = LOG_DIR_URI_DEFAULT,
 
     /**
      * 自愈执行通道：
@@ -109,6 +138,12 @@ data class GuardSettings(
     /** 开机自启守护服务（配合前台服务恢复，需系统不杀） */
     val startOnBoot: Boolean = START_ON_BOOT_DEFAULT
 ) {
+    /** 某级别日志是否被记录（logLevels 位掩码：bit=level） */
+    fun logLevelsEnabled(level: Int): Boolean = logLevels and (1 shl level) != 0
+
+    /** 旧 verboseLog 语义兼容：INFO 级（在线检测结果）是否记录 */
+    fun verboseLogEnabled(level: Int): Boolean = logLevelsEnabled(level)
+
     companion object {
         // ---- 键名 ----
         const val PROBE_MODES_KEY = "guard_probe_modes"
@@ -118,15 +153,19 @@ data class GuardSettings(
         const val CHECK_ON_NETWORK_CHANGE_KEY = "guard_check_on_network_change"
         const val ONLY_WHEN_WIFI_CONNECTED_KEY = "guard_only_when_wifi_connected"
         const val HEAL_STRATEGY_KEY = "guard_heal_strategy"
+        const val CUSTOM_HEAL_ACTIONS_KEY = "guard_custom_heal_actions"
         const val HEAL_VERIFY_TIMEOUT_SEC_KEY = "guard_heal_verify_timeout_sec"
         const val HEAL_COOLDOWN_BASE_SEC_KEY = "guard_heal_cooldown_base_sec"
         const val MAX_BACKOFF_POWER_KEY = "guard_max_backoff_power"
+        const val HEAL_MAX_ATTEMPTS_KEY = "guard_heal_max_attempts"
         const val SKIP_WHEN_WIFI_DISCONNECTED_KEY = "guard_skip_when_wifi_disconnected"
         const val SKIP_ON_CAPTIVE_PORTAL_KEY = "guard_skip_on_captive_portal"
         const val NOTIFY_ON_HEAL_KEY = "guard_notify_on_heal"
         const val NOTIFY_ON_HEAL_FAIL_KEY = "guard_notify_on_heal_fail"
         const val SHOW_PERSISTENT_NOTIFICATION_KEY = "guard_show_persistent_notification"
-        const val VERBOSE_LOG_KEY = "guard_verbose_log"
+        const val VERBOSE_LOG_KEY = "guard_verbose_log" // 旧版布尔开关（迁移源）
+        const val LOG_LEVELS_KEY = "guard_log_levels"
+        const val LOG_DIR_URI_KEY = "guard_log_dir_uri"
         const val HEAL_CHANNEL_KEY = "guard_heal_channel"
         const val START_ON_BOOT_KEY = "guard_start_on_boot"
 
@@ -138,17 +177,31 @@ data class GuardSettings(
         const val CHECK_ON_NETWORK_CHANGE_DEFAULT = true
         const val ONLY_WHEN_WIFI_CONNECTED_DEFAULT = true
         const val HEAL_STRATEGY_DEFAULT = 2
+        const val CUSTOM_HEAL_ACTIONS_DEFAULT = ""
         const val HEAL_VERIFY_TIMEOUT_SEC_DEFAULT = 20
         const val HEAL_COOLDOWN_BASE_SEC_DEFAULT = 30
         const val MAX_BACKOFF_POWER_DEFAULT = 4
+        /** 默认无限重试（保持旧行为）；可选 2/3/5/10 次上限 */
+        const val HEAL_MAX_ATTEMPTS_DEFAULT = 0
         const val SKIP_WHEN_WIFI_DISCONNECTED_DEFAULT = true
         const val SKIP_ON_CAPTIVE_PORTAL_DEFAULT = true
         const val NOTIFY_ON_HEAL_DEFAULT = true
         const val NOTIFY_ON_HEAL_FAIL_DEFAULT = true
         const val SHOW_PERSISTENT_NOTIFICATION_DEFAULT = true
         const val VERBOSE_LOG_DEFAULT = true
+        /** 默认记录全部类型（正常+警告+错误+自愈） */
+        const val LOG_LEVELS_DEFAULT = 0b1111
+        const val LOG_DIR_URI_DEFAULT = ""
         const val HEAL_CHANNEL_DEFAULT = 0
         const val START_ON_BOOT_DEFAULT = false
+
+        /** 熔断次数上限预设（0 = 无限制） */
+        val MAX_ATTEMPTS_PRESETS = listOf(0, 2, 3, 5, 10)
+
+        /** 自定义档可选动作 id（由轻到重，与 WifiHealer 五级动作一致） */
+        val CUSTOM_ACTION_IDS = listOf(
+            "reassociate", "reconnect", "disable+enable", "cmd connect", "wifi cycle"
+        )
 
         const val PREFS_NAME = "settings_guard"
 
@@ -176,6 +229,9 @@ data class GuardSettings(
                     ONLY_WHEN_WIFI_CONNECTED_KEY, ONLY_WHEN_WIFI_CONNECTED_DEFAULT
                 ),
                 healStrategy = prefs.getInt(HEAL_STRATEGY_KEY, HEAL_STRATEGY_DEFAULT),
+                customHealActions = prefs.getString(
+                    CUSTOM_HEAL_ACTIONS_KEY, CUSTOM_HEAL_ACTIONS_DEFAULT
+                ).orEmpty(),
                 healVerifyTimeoutSec = prefs.getInt(
                     HEAL_VERIFY_TIMEOUT_SEC_KEY, HEAL_VERIFY_TIMEOUT_SEC_DEFAULT
                 ).coerceIn(5, 120),
@@ -184,6 +240,9 @@ data class GuardSettings(
                 ).coerceIn(5, 600),
                 maxBackoffPower = prefs.getInt(MAX_BACKOFF_POWER_KEY, MAX_BACKOFF_POWER_DEFAULT)
                     .coerceIn(1, 8),
+                healMaxAttempts = prefs.getInt(
+                    HEAL_MAX_ATTEMPTS_KEY, HEAL_MAX_ATTEMPTS_DEFAULT
+                ).coerceIn(0, 99),
                 skipWhenWifiDisconnected = prefs.getBoolean(
                     SKIP_WHEN_WIFI_DISCONNECTED_KEY, SKIP_WHEN_WIFI_DISCONNECTED_DEFAULT
                 ),
@@ -197,7 +256,17 @@ data class GuardSettings(
                 showPersistentNotification = prefs.getBoolean(
                     SHOW_PERSISTENT_NOTIFICATION_KEY, SHOW_PERSISTENT_NOTIFICATION_DEFAULT
                 ),
-                verboseLog = prefs.getBoolean(VERBOSE_LOG_KEY, VERBOSE_LOG_DEFAULT),
+                // 迁移：旧版 verboseLog=false → 仅记录 异常+自愈；否则全部记录
+                logLevels = if (prefs.contains(LOG_LEVELS_KEY)) {
+                    prefs.getInt(LOG_LEVELS_KEY, LOG_LEVELS_DEFAULT)
+                } else if (prefs.contains(VERBOSE_LOG_KEY) &&
+                    !prefs.getBoolean(VERBOSE_LOG_KEY, VERBOSE_LOG_DEFAULT)
+                ) {
+                    0b1110
+                } else {
+                    LOG_LEVELS_DEFAULT
+                },
+                logDirUri = prefs.getString(LOG_DIR_URI_KEY, LOG_DIR_URI_DEFAULT).orEmpty(),
                 healChannel = prefs.getInt(HEAL_CHANNEL_KEY, HEAL_CHANNEL_DEFAULT),
                 startOnBoot = prefs.getBoolean(START_ON_BOOT_KEY, START_ON_BOOT_DEFAULT)
             )

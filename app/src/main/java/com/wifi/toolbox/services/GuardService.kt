@@ -69,8 +69,9 @@ class GuardService : Service() {
     private var loopJob: Job? = null
     private val healMutex = Mutex()          // 自愈互斥（事件触发与定时触发并发保护）
     private var consecutiveFails = 0         // 连续失败计数（防抖）
-    private var consecutiveHealFails = 0     // 连续自愈失败计数（指数退避）
+    private var consecutiveHealFails = 0     // 连续自愈失败计数（指数退避+熔断）
     private var lastEventLog = ""            // 最近一次事件触发的 action（去重）
+    private var breakerNotified = false      // 熔断提示已发（防重复日志/通知）
 
     override fun onCreate() {
         super.onCreate()
@@ -151,6 +152,13 @@ class GuardService : Service() {
      * 单轮检测 + 必要时自愈。manual=true 时跳过防抖（手动检测立即给出结论）
      */
     private suspend fun runOneCheck(manual: Boolean = false) = healMutex.withLock {
+        if (manual) {
+            // 手动"立即检测" = 半开探测：复位熔断计数（用户明确希望立即再试一次）
+            if (consecutiveHealFails > 0) {
+                consecutiveHealFails = 0
+                breakerNotified = false
+            }
+        }
         if (settings.onlyWhenWifiConnected) {
             // 关键：用 ConnectivityManager 的 allNetworks 判定 WiFi 连接（免定位权限），
             // 与 NetProber 绑网探测同源。原实现用 connectionInfo.ssid 判断，
@@ -182,8 +190,15 @@ class GuardService : Service() {
         if (verdict.online) {
             // verboseLog 开启时每轮在线结果都记录（用户可确认守护在跑）；
             // 关闭时仅记录"从故障恢复"与手动检测，保持日志清爽
-            if (settings.verboseLog || consecutiveFails > 0 || manual) {
+            if (settings.verboseLogEnabled(GuardLog.LEVEL_INFO) || consecutiveFails > 0 || manual) {
                 log(getString(R.string.guard_log_online, detail), GuardLog.LEVEL_INFO)
+            }
+            // 网络自行恢复（如路由器来电）：熔断计数与防抖计数一并复位
+            // （旧版漏掉此处导致 consecutiveHealFails 永不复位、退避无限叠加）
+            if (consecutiveHealFails > 0) {
+                consecutiveHealFails = 0
+                breakerNotified = false
+                log(getString(R.string.guard_log_breaker_reset), GuardLog.LEVEL_HEAL)
             }
             consecutiveFails = 0
             GuardState.currentState = GuardState.STATE_ONLINE
@@ -272,6 +287,28 @@ class GuardService : Service() {
     }
 
     private suspend fun performHeal(verdict: com.wifi.toolbox.utils.ProbeVerdict) {
+        // ---- 熔断检查（Circuit Breaker，网络调研 AWS/ByteByteGo 通行做法）----
+        // 连续自愈失败达到次数上限后停止自愈动作（检测继续），
+        // 等待网络恢复在线或手动"立即检测"时复位（半开探测思想）
+        val maxAttempts = settings.healMaxAttempts
+        if (maxAttempts > 0 && consecutiveHealFails >= maxAttempts) {
+            if (!breakerNotified) {
+                breakerNotified = true
+                log(
+                    getString(R.string.guard_log_breaker_open, maxAttempts),
+                    GuardLog.LEVEL_ERROR
+                )
+                if (settings.notifyOnHealFail) {
+                    notifyEvent(
+                        getString(R.string.guard_notif_breaker_title),
+                        getString(R.string.guard_notif_breaker_text, maxAttempts)
+                    )
+                }
+            }
+            GuardState.currentState = GuardState.STATE_HEAL_FAILED
+            return
+        }
+
         // 指数退避：连续失败后成倍等待
         if (consecutiveHealFails > 0) {
             val backoff = settings.healCooldownBaseSec * 1000L *
@@ -299,7 +336,8 @@ class GuardService : Service() {
             verify = {
                 NetProber.probe(applicationContext, settings) { cmd -> healer.shellExec(cmd) }.online
             },
-            log = { log(it, GuardLog.LEVEL_HEAL) }
+            log = { log(it, GuardLog.LEVEL_HEAL) },
+            actionStats = stats.actionStats.toMap()
         )
 
         // 最终验证（给最后一个动作一点生效时间）
@@ -318,6 +356,7 @@ class GuardService : Service() {
 
         if (recovered) {
             consecutiveHealFails = 0
+            breakerNotified = false
             consecutiveFails = 0
             GuardState.currentState = GuardState.STATE_ONLINE
             log(getString(R.string.guard_log_heal_ok, cost / 1000), GuardLog.LEVEL_HEAL)
@@ -409,6 +448,8 @@ class GuardService : Service() {
     }
 
     private fun log(msg: String, level: Int = GuardLog.LEVEL_INFO) {
+        // 按设置的"记录日志类型"位掩码过滤（默认全部记录）
+        if (!settings.logLevelsEnabled(level)) return
         GuardState.addLog(msg, level)
     }
 

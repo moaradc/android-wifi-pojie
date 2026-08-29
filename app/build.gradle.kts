@@ -28,8 +28,8 @@ android {
         minSdk = 24
         //noinspection ExpiredTargetSdkVersion 注:WifiManager需要
         targetSdk = 28
-        versionCode = 7
-        versionName = "v3.0.0_Alpha-08"
+        versionCode = 8
+        versionName = "v3.0.0_Alpha-09"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -113,6 +113,7 @@ dependencies {
     implementation(libs.editor)
     implementation(libs.languageTextmate)
     implementation(libs.androidx.fragment.ktx)
+    implementation(libs.androidx.documentfile)
 
     implementation(libs.play.services.location) //注:依赖play服务，打开系统定位（也许有点臃肿，算了不管了）
     testImplementation(libs.junit)

@@ -7,6 +7,7 @@ core = "6.0.0"
 desugar_jdk_libs = "2.1.5"
 editorBom = "0.24.4"
 fragmentKtx = "1.8.9"
+documentfile = "1.1.0"
 gson = "2.13.2"
 hiddenapibypass = "6.1"
 kotlin = "2.3.0"
@@ -35,6 +36,7 @@ androidx-compose-bom-v20251200 = { module = "androidx.compose:compose-bom", vers
 androidx-compose-material3 = { module = "androidx.compose.material3:material3", version.ref = "material3Version" }
 androidx-compose-material3-adaptive-navigation-suite = { module = "androidx.compose.material3:material3-adaptive-navigation-suite", version.ref = "material3Version" }
 androidx-fragment-ktx = { module = "androidx.fragment:fragment-ktx", version.ref = "fragmentKtx" }
+androidx-documentfile = { module = "androidx.documentfile:documentfile", version.ref = "documentfile" }
 androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigationCompose" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 api = { module = "dev.rikka.shizuku:api", version.ref = "shizukuVersion" }

@@ -267,7 +267,9 @@ object NetProber {
                 val err = firstErrorLine(outcome.output)
                 if (err.isNullOrEmpty()) "exit=${outcome.exitCode}" else err
             }
-            ProbeResult("ICMP", outcome.exitCode == 0, "$detail [${outcome.channel}]")
+            // 通道不在 detail 中标注（状态卡"当前通道"行已实时展示，
+            // 避免每行重复 [Shizuku] 造成的信息噪音）
+            ProbeResult("ICMP", outcome.exitCode == 0, detail)
         } catch (e: Exception) {
             ProbeResult("ICMP", false, e.javaClass.simpleName)
         }

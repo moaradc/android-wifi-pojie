@@ -4,7 +4,13 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
@@ -24,6 +30,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import com.wifi.toolbox.R
@@ -36,7 +43,10 @@ import com.wifi.toolbox.structs.GuardSettings
 import com.wifi.toolbox.ui.items.BannerTip
 import com.wifi.toolbox.ui.items.NavContainer
 import com.wifi.toolbox.ui.items.NavPage
+import com.wifi.toolbox.ui.items.checkShizukuUI
+import com.wifi.toolbox.utils.GuardLogStore
 import com.wifi.toolbox.utils.GuardStats
+import com.wifi.toolbox.utils.StoredLogFile
 import com.wifi.toolbox.utils.WifiHealer
 import com.wifi.toolbox.utils.rememberGuardSettings
 import me.zhanghai.compose.preference.*
@@ -196,21 +206,11 @@ private fun StatusPage(settings: GuardSettings, app: ToolboxApp?) {
                         )
                     }
 
-                    // ---- 通道可见性：解决"已授权但不知道是否真的在用" ----
+                    // ---- 通道可见性：默认单行截断，点击动画展开全部，长按复制 ----
                     val shellChannel = GuardState.lastShellChannel
                     val healChannel = GuardState.lastHealChannel
                     if (shellChannel.isNotEmpty() || healChannel.isNotEmpty()) {
-                        val parts = buildList {
-                            if (shellChannel.isNotEmpty()) add(shellChannel)
-                            if (healChannel.isNotEmpty()) add(healChannel)
-                        }
-                        Text(
-                            text = stringResource(
-                                R.string.guard_channel_current, parts.joinToString(" / ")
-                            ),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        ChannelLine(shellChannel, healChannel)
                     }
 
                     lastVerdict?.let { v ->
@@ -264,8 +264,8 @@ private fun StatusPage(settings: GuardSettings, app: ToolboxApp?) {
         }
 
         item {
-            // ---- 实时日志（复制/清空/保存/导出/管理/筛选） ----
-            LiveLogCard(context)
+            // ---- 实时日志（复制/清空/保存/导出/管理/多选筛选） ----
+            LiveLogCard(context, settings.logDirUri)
         }
     }
 }
@@ -290,6 +290,94 @@ private fun stateLabel(state: String): Pair<String, Color> {
     }
 }
 
+/**
+ * 当前通道行：
+ * - 默认单行截断（省屏幕空间）；点击平滑动画展开为逐通道分行
+ * - 长按复制通道内容（收起时长按复制全部，展开时长按复制对应通道行）
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun ChannelLine(shellChannel: String, healChannel: String) {
+    val context = LocalContext.current
+    var expanded by rememberSaveable {
+        mutableStateOf(false)
+    }
+    val probeLabel = stringResource(R.string.guard_channel_probe)
+    val healLabel = stringResource(R.string.guard_channel_heal)
+
+    fun copyText(text: String) {
+        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        cm.setPrimaryClip(ClipData.newPlainText("guard_channel", text))
+        Toast.makeText(
+            context, context.getString(R.string.guard_channel_copied), Toast.LENGTH_SHORT
+        ).show()
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .animateContentSize()  // 展开/收起的流畅高度动画
+            .combinedClickable(
+                onClick = { expanded = !expanded },
+                onLongClick = {
+                    // 收起状态：长按复制全部通道信息
+                    val text = listOf(
+                        "$probeLabel: $shellChannel",
+                        "$healLabel: $healChannel"
+                    ).filter {
+                        !it.endsWith(": ")
+                    }.joinToString(" / ")
+                    copyText(text)
+                }
+            )
+            .padding(vertical = 2.dp)
+    ) {
+        if (expanded) {
+            Text(
+                text = stringResource(R.string.guard_channel_current_title),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (shellChannel.isNotEmpty()) {
+                Text(
+                    text = "$probeLabel: $shellChannel",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.combinedClickable(
+                        onClick = { expanded = !expanded },
+                        onLongClick = { copyText(shellChannel) }
+                    )
+                )
+            }
+            if (healChannel.isNotEmpty()) {
+                Text(
+                    text = "$healLabel: $healChannel",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.combinedClickable(
+                        onClick = { expanded = !expanded },
+                        onLongClick = { copyText(healChannel) }
+                    )
+                )
+            }
+        } else {
+            val merged = listOf(
+                "$probeLabel $shellChannel",
+                "$healLabel $healChannel"
+            ).filter { !it.endsWith(" ") }.joinToString(" / ")
+            Text(
+                text = stringResource(R.string.guard_channel_current, merged),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
 private fun formatAgo(seconds: Long): String {
     return when {
         seconds < 60 -> "${seconds}s"
@@ -300,14 +388,21 @@ private fun formatAgo(seconds: Long): String {
 
 // ==================== 实时日志卡片 ====================
 
-/** 日志筛选模式 */
-private const val LOG_FILTER_ALL = 0
-private const val LOG_FILTER_ERROR = 1
-private const val LOG_FILTER_HEAL = 2
+/**
+ * 日志显示筛选（多选位掩码）：
+ * bit0 = 正常（INFO）；bit1 = 异常（WARN+ERROR）；bit2 = 自愈（HEAL）
+ */
+private const val LOG_FILTER_INFO = 1
+private const val LOG_FILTER_ERROR = 2
+private const val LOG_FILTER_HEAL = 4
+private const val LOG_FILTER_ALL = LOG_FILTER_INFO or LOG_FILTER_ERROR or LOG_FILTER_HEAL
 
-/** 守护日志保存目录（应用外部私有目录，免存储权限，可被文件管理器访问） */
-private fun guardLogDir(context: Context): File =
-    File(context.getExternalFilesDir(null), "guard_logs").apply { mkdirs() }
+/** 日志级别 → 显示分组 */
+private fun logGroupBit(level: Int): Int = when (level) {
+    GuardLog.LEVEL_INFO -> LOG_FILTER_INFO
+    GuardLog.LEVEL_HEAL -> LOG_FILTER_HEAL
+    else -> LOG_FILTER_ERROR // WARN + ERROR 归入"异常"
+}
 
 /** 单条日志的可复制文本 */
 private fun formatEntry(entry: GuardLogEntry): String =
@@ -315,17 +410,17 @@ private fun formatEntry(entry: GuardLogEntry): String =
 
 /**
  * 实时日志卡片：
- * - 工具行：复制 / 清空 / 保存 / 导出(分享) / 管理(已保存列表)
- * - 筛选：全部 / 仅异常 / 仅自愈
+ * - 工具行：复制 / 保存 / 导出(分享) / 管理(已保存列表) / 清空
+ * - 筛选多选：全部 / 正常 / 异常 / 自愈（可任意组合，全不选显示空）
  * - 按级别着色展示（最近 50 条）
+ * - 保存位置：默认应用私有 log 目录，可在设置页改为 SAF 自选文件夹
  */
 @Composable
-private fun LiveLogCard(context: Context) {
+private fun LiveLogCard(context: Context, logDirUri: String) {
     val logs = GuardState.logList()
-    var filter by rememberSaveable { mutableIntStateOf(LOG_FILTER_ALL) }
+    var filterMask by rememberSaveable { mutableIntStateOf(LOG_FILTER_ALL) }
     var showManage by remember { mutableStateOf(false) }
     var toastMsg by remember { mutableStateOf<String?>(null) }
-    val dir = remember(context) { guardLogDir(context) }
 
     fun toast(msg: String) {
         toastMsg = msg
@@ -339,16 +434,11 @@ private fun LiveLogCard(context: Context) {
         }
     }
 
-    /** 当前筛选下要操作的日志文本（点击时实时读取，避免闭包过期） */
+    /** 当前筛选下要操作的日志列表（点击时实时读取，避免闭包过期） */
     fun visibleEntries(): List<GuardLogEntry> {
         val all = GuardState.logList()
-        return when (filter) {
-            LOG_FILTER_ERROR -> all.filter {
-                it.level == GuardLog.LEVEL_ERROR || it.level == GuardLog.LEVEL_WARN
-            }
-            LOG_FILTER_HEAL -> all.filter { it.level == GuardLog.LEVEL_HEAL }
-            else -> all
-        }
+        if (filterMask == 0) return emptyList()
+        return all.filter { filterMask and logGroupBit(it.level) != 0 }
     }
 
     fun entriesToText(entries: List<GuardLogEntry>): String {
@@ -361,6 +451,14 @@ private fun LiveLogCard(context: Context) {
             appendLine("--------")
             entries.forEach { appendLine(formatEntry(it)) }
         }
+    }
+
+    /** 保存到当前设置位置，返回已保存文件（失败 null） */
+    fun saveNow(): StoredLogFile? {
+        val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.getDefault()).format(Date())
+        return GuardLogStore.save(
+            context, logDirUri, "guard-$stamp.log", entriesToText(visibleEntries())
+        )
     }
 
     Card(
@@ -403,11 +501,10 @@ private fun LiveLogCard(context: Context) {
                 }
                 IconButton(
                     onClick = {
-                        val entries = visibleEntries()
-                        val file = writeGuardLogFile(dir, entriesToText(entries))
+                        val saved = saveNow()
                         toast(
-                            if (file != null) context.getString(
-                                R.string.guard_log_saved, file.name
+                            if (saved != null) context.getString(
+                                R.string.guard_log_saved, saved.name
                             )
                             else context.getString(R.string.guard_log_save_fail)
                         )
@@ -422,8 +519,8 @@ private fun LiveLogCard(context: Context) {
                 }
                 IconButton(
                     onClick = {
-                        val file = writeGuardLogFile(dir, entriesToText(visibleEntries()))
-                        if (file != null) shareLogFile(context, file)
+                        val saved = saveNow()
+                        if (saved != null) shareStoredFile(context, saved)
                         else toast(context.getString(R.string.guard_log_save_fail))
                     },
                     modifier = Modifier.size(36.dp)
@@ -459,24 +556,29 @@ private fun LiveLogCard(context: Context) {
                 }
             }
 
-            // ---- 筛选行 ----
+            // ---- 筛选行（多选） ----
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.padding(top = 4.dp)
             ) {
                 FilterChip(
-                    selected = filter == LOG_FILTER_ALL,
-                    onClick = { filter = LOG_FILTER_ALL },
+                    selected = filterMask == LOG_FILTER_ALL,
+                    onClick = { filterMask = LOG_FILTER_ALL },
                     label = { Text(stringResource(R.string.guard_log_filter_all)) }
                 )
                 FilterChip(
-                    selected = filter == LOG_FILTER_ERROR,
-                    onClick = { filter = LOG_FILTER_ERROR },
+                    selected = filterMask and LOG_FILTER_INFO != 0,
+                    onClick = { filterMask = filterMask xor LOG_FILTER_INFO },
+                    label = { Text(stringResource(R.string.guard_log_filter_info)) }
+                )
+                FilterChip(
+                    selected = filterMask and LOG_FILTER_ERROR != 0,
+                    onClick = { filterMask = filterMask xor LOG_FILTER_ERROR },
                     label = { Text(stringResource(R.string.guard_log_filter_error)) }
                 )
                 FilterChip(
-                    selected = filter == LOG_FILTER_HEAL,
-                    onClick = { filter = LOG_FILTER_HEAL },
+                    selected = filterMask and LOG_FILTER_HEAL != 0,
+                    onClick = { filterMask = filterMask xor LOG_FILTER_HEAL },
                     label = { Text(stringResource(R.string.guard_log_filter_heal)) }
                 )
             }
@@ -484,16 +586,14 @@ private fun LiveLogCard(context: Context) {
             Spacer(Modifier.height(8.dp))
 
             // ---- 日志正文 ----
-            val filtered = when (filter) {
-                LOG_FILTER_ERROR -> logs.filter {
-                    it.level == GuardLog.LEVEL_ERROR || it.level == GuardLog.LEVEL_WARN
-                }
-                LOG_FILTER_HEAL -> logs.filter { it.level == GuardLog.LEVEL_HEAL }
-                else -> logs
-            }
+            val filtered = if (filterMask == 0) emptyList()
+            else logs.filter { filterMask and logGroupBit(it.level) != 0 }
             if (filtered.isEmpty()) {
                 Text(
-                    stringResource(R.string.guard_no_log),
+                    stringResource(
+                        if (filterMask == 0) R.string.guard_log_filter_none
+                        else R.string.guard_no_log
+                    ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -512,7 +612,7 @@ private fun LiveLogCard(context: Context) {
     }
 
     if (showManage) {
-        SavedLogsDialog(context = context, dir = dir, onDismiss = { showManage = false })
+        SavedLogsDialog(context = context, logDirUri = logDirUri, onDismiss = { showManage = false })
     }
 }
 
@@ -527,20 +627,7 @@ private fun logLevelColor(level: Int): Color {
     }
 }
 
-/** 生成日志文件（时间戳命名，避免覆盖） */
-private fun writeGuardLogFile(dir: File, content: String): File? {
-    if (content.isEmpty()) return null
-    return try {
-        val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.getDefault()).format(Date())
-        val file = File(dir, "guard-$stamp.log")
-        file.writeText(content)
-        file
-    } catch (_: Exception) {
-        null
-    }
-}
-
-/** 通过 FileProvider 分享日志文件（系统分享面板） */
+/** 通过 FileProvider 分享私有目录日志文件（系统分享面板） */
 private fun shareLogFile(context: Context, file: File) {
     try {
         val uri = FileProvider.getUriForFile(
@@ -556,16 +643,32 @@ private fun shareLogFile(context: Context, file: File) {
     }
 }
 
+/** 分享已保存日志（私有目录走 FileProvider，SAF 文档直接共享 content Uri） */
+private fun shareStoredFile(context: Context, f: StoredLogFile) {
+    try {
+        if (f.isSaf && f.uri != null) {
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_STREAM, f.uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            context.startActivity(Intent.createChooser(intent, null))
+        } else if (f.file != null) {
+            shareLogFile(context, f.file)
+        }
+    } catch (_: Exception) {
+    }
+}
+
 /**
- * 已保存日志管理对话框：列出全部日志文件（时间倒序），
- * 支持单个分享 / 单个删除 / 全部清空。
+ * 已保存日志管理对话框：列出全部保存位置的日志文件（时间倒序，
+ * 标注来源：应用目录 / 自选目录），支持单个分享 / 单个删除 / 全部清空。
  */
 @Composable
-private fun SavedLogsDialog(context: Context, dir: File, onDismiss: () -> Unit) {
+private fun SavedLogsDialog(context: Context, logDirUri: String, onDismiss: () -> Unit) {
     var version by remember { mutableIntStateOf(0) }
-    val files = remember(version) {
-        dir.listFiles()?.filter { it.isFile }?.sortedByDescending { it.lastModified() }
-            ?: emptyList()
+    val files = remember(version, logDirUri) {
+        GuardLogStore.list(context, logDirUri)
     }
     val fmt = remember { SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()) }
 
@@ -600,13 +703,17 @@ private fun SavedLogsDialog(context: Context, dir: File, onDismiss: () -> Unit) 
                                     fontFamily = FontFamily.Monospace
                                 )
                                 Text(
-                                    "${f.length() / 1024}KB · ${fmt.format(Date(f.lastModified()))}",
+                                    "${f.sizeBytes / 1024}KB · ${fmt.format(Date(f.lastModified))} · " +
+                                            stringResource(
+                                                if (f.isSaf) R.string.guard_log_src_saf
+                                                else R.string.guard_log_src_app
+                                            ),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                             IconButton(
-                                onClick = { shareLogFile(context, f) },
+                                onClick = { shareStoredFile(context, f) },
                                 modifier = Modifier.size(34.dp)
                             ) {
                                 Icon(
@@ -617,7 +724,7 @@ private fun SavedLogsDialog(context: Context, dir: File, onDismiss: () -> Unit) 
                             }
                             IconButton(
                                 onClick = {
-                                    f.delete()
+                                    GuardLogStore.delete(context, f)
                                     version++
                                 },
                                 modifier = Modifier.size(34.dp)
@@ -636,7 +743,7 @@ private fun SavedLogsDialog(context: Context, dir: File, onDismiss: () -> Unit) 
         confirmButton = {
             if (files.isNotEmpty()) {
                 TextButton(onClick = {
-                    files.forEach { it.delete() }
+                    GuardLogStore.clear(context, files)
                     version++
                 }) { Text(stringResource(R.string.guard_log_delete_all)) }
             }
@@ -653,19 +760,27 @@ private fun SavedLogsDialog(context: Context, dir: File, onDismiss: () -> Unit) 
 private fun GuardSettingsPage(settings: MutableState<GuardSettings>, app: ToolboxApp?) {
     val s = settings.value
     val context = LocalContext.current
+    val stats = remember { app?.guardStats }
 
     val probeHttp = s.probeModes and GuardSettings.PROBE_HTTP_204 != 0
     val probeDns = s.probeModes and GuardSettings.PROBE_DNS != 0
     val probeIcmp = s.probeModes and GuardSettings.PROBE_ICMP != 0
     val probeValidated = s.probeModes and GuardSettings.PROBE_VALIDATED != 0
 
+    // 高成功率档仅在存在成功统计时才出现在下拉菜单中
+    val bestAction = remember(stats?.actionStats?.size, s.healStrategy) { stats?.bestAction() }
+    // 注意：stringResource 只能在 Composable 上下文直接调用，不能放进 buildList/lambda
+    val strategy6Label = bestAction?.let { stringResource(R.string.guard_strategy_6, it) }
     val strategyValues = listOf(
         stringResource(R.string.guard_strategy_0),
         stringResource(R.string.guard_strategy_1),
         stringResource(R.string.guard_strategy_2),
         stringResource(R.string.guard_strategy_3),
-        stringResource(R.string.guard_strategy_4)
-    )
+        stringResource(R.string.guard_strategy_4),
+        stringResource(R.string.guard_strategy_5)
+    ) + listOfNotNull(strategy6Label)
+    // 保存的档位可能已不在菜单中（如高成功率档但统计被清零）→ 显示时回退标准档
+    val strategyIndex = if (s.healStrategy < strategyValues.size) s.healStrategy else 2
     val channelValues = listOf(
         stringResource(R.string.guard_channel_auto),
         stringResource(R.string.shizuku),
@@ -675,6 +790,33 @@ private fun GuardSettingsPage(settings: MutableState<GuardSettings>, app: Toolbo
 
     var showCustomInterval by remember { mutableStateOf(false) }
     var customIntervalText by remember { mutableStateOf(s.checkIntervalSec.toString()) }
+    var showLogTypeDialog by remember { mutableStateOf(false) }
+    var showLogDirDialog by remember { mutableStateOf(false) }
+
+    // 自定义档已选动作（LazyColumn 主体非 Composable，remember 需在函数体计算）
+    val selectedActions = remember(s.customHealActions) {
+        s.customHealActions.split(',')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .toSet()
+    }
+
+    // SAF 文件夹选择器：选择后持久化读写授权并更新设置
+    val dirLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                            Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+            } catch (_: Exception) {
+            }
+            settings.value = s.copy(logDirUri = uri.toString())
+        }
+    }
 
     ProvidePreferenceLocals {
         LazyColumn(modifier = Modifier.fillMaxSize()) {
@@ -774,17 +916,6 @@ private fun GuardSettingsPage(settings: MutableState<GuardSettings>, app: Toolbo
                     }
                 }
             }
-            item {
-                SwitchPreference(
-                    value = s.verboseLog,
-                    onValueChange = {
-                        settings.value = s.copy(verboseLog = it)
-                    },
-                    title = { Text(stringResource(R.string.guard_verbose_log)) },
-                    summary = { Text(stringResource(R.string.guard_verbose_log_tip)) },
-                    icon = { Icon(Icons.Filled.ReceiptLong, null) }
-                )
-            }
 
             // ---- 检测时机 ----
             item { PreferenceCategory(title = { Text(stringResource(R.string.guard_cat_timing)) }) }
@@ -851,22 +982,62 @@ private fun GuardSettingsPage(settings: MutableState<GuardSettings>, app: Toolbo
                     icon = { Icon(Icons.Filled.Wifi, null) }
                 )
             }
-
             // ---- 自愈设置 ----
             item { PreferenceCategory(title = { Text(stringResource(R.string.guard_cat_heal)) }) }
             item {
                 ListPreference(
-                    value = s.healStrategy,
-                    onValueChange = {
-                        settings.value = s.copy(healStrategy = it)
+                    value = strategyIndex,
+                    onValueChange = { index ->
+                        settings.value = s.copy(healStrategy = index)
                     },
                     title = { Text(stringResource(R.string.guard_heal_strategy)) },
-                    summary = { Text(strategyValues[s.healStrategy]) },
+                    summary = { Text(strategyValues[strategyIndex]) },
                     icon = { Icon(Icons.Filled.Healing, null) },
                     values = strategyValues.indices.toList(),
                     valueToText = { i: Int -> AnnotatedString(strategyValues[i]) },
                     type = ListPreferenceType.DROPDOWN_MENU
                 )
+            }
+            // ---- 自定义档：自选动作组合（仅在档位=5 时显示） ----
+            if (s.healStrategy == 5) {
+                item {
+                    BannerTip(
+                        text = stringResource(R.string.guard_custom_actions_tip),
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                    )
+                }
+                val selectedActionsRef = selectedActions
+                GuardSettings.CUSTOM_ACTION_IDS.forEach { actionId ->
+                    item {
+                        CheckboxPreference(
+                            value = actionId in selectedActions,
+                            onValueChange = { on ->
+                                val next = if (on) selectedActionsRef + actionId
+                                else selectedActionsRef - actionId
+                                // 按由轻到重固定顺序存储
+                                val ordered = GuardSettings.CUSTOM_ACTION_IDS
+                                    .filter { it in next }
+                                settings.value = s.copy(
+                                    customHealActions = ordered.joinToString(",")
+                                )
+                            },
+                            title = { Text(customActionLabel(actionId)) },
+                            summary = { Text(customActionTip(actionId)) }
+                        )
+                    }
+                }
+            }
+            // ---- 高成功率档当前优选信息 ----
+            if (s.healStrategy == 6) {
+                item {
+                    BannerTip(
+                        text = stringResource(
+                            R.string.guard_strategy_best_tip,
+                            bestAction ?: "reconnect"
+                        ),
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                    )
+                }
             }
             item {
                 BannerTip(
@@ -909,17 +1080,49 @@ private fun GuardSettingsPage(settings: MutableState<GuardSettings>, app: Toolbo
                 }
             }
             item {
-                // 通道可用性检测：让用户直观看到"选的通道现在能不能用"
-                // （解决"已授权 Shizuku 但不知道是否真的被使用"的疑虑）
-                val shizukuOk = remember(s.healChannel, s.probeModes) {
+                // 退避次数限制（熔断）：无限制 / 2 / 3 / 5 / 10 次
+                val presets = GuardSettings.MAX_ATTEMPTS_PRESETS
+                val idx = presets.indexOf(s.healMaxAttempts)
+                ListPreference(
+                    value = if (idx >= 0) idx else 0,
+                    onValueChange = { i ->
+                        settings.value = s.copy(healMaxAttempts = presets[i])
+                    },
+                    title = { Text(stringResource(R.string.guard_max_attempts)) },
+                    summary = {
+                        Text(
+                            if (s.healMaxAttempts == 0) stringResource(R.string.guard_max_attempts_unlimited)
+                            else stringResource(R.string.guard_max_attempts_value, s.healMaxAttempts)
+                        )
+                    },
+                    icon = { Icon(Icons.Filled.Repeat, null) },
+                    values = presets.indices.toList(),
+                    valueToText = { i: Int ->
+                        AnnotatedString(
+                            if (presets[i] == 0) context.getString(R.string.guard_max_attempts_unlimited)
+                            else context.getString(R.string.guard_max_attempts_value, presets[i])
+                        )
+                    },
+                    type = ListPreferenceType.DROPDOWN_MENU
+                )
+            }
+            item {
+                BannerTip(
+                    text = stringResource(R.string.guard_max_attempts_tip),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                )
+            }
+            item {
+                // 通道可用性检测 + 未授权时触发权限申请：
+                // 选 Shizuku 未授权 → 弹 Shizuku 授权；选 RootAIDL 未连接 → 拉起 Root 服务（root 授权弹窗）
+                var channelRefresh by remember { mutableIntStateOf(0) }
+                val shizukuOk = remember(s.healChannel, channelRefresh) {
                     WifiHealer.isShizukuAvailable()
                 }
-                val aidlOk = remember(s.healChannel, s.probeModes) {
-                    try {
-                        app?.aidl?.ipc != null
-                    } catch (_: Exception) {
-                        false
-                    }
+                val aidlOk = try {
+                    app?.aidl?.ipc != null
+                } catch (_: Exception) {
+                    false
                 }
                 val availability = when {
                     s.healChannel == 1 -> "Shizuku " + if (shizukuOk) "✓" else "✗"
@@ -931,8 +1134,24 @@ private fun GuardSettingsPage(settings: MutableState<GuardSettings>, app: Toolbo
                 }
                 ListPreference(
                     value = s.healChannel,
-                    onValueChange = {
-                        settings.value = s.copy(healChannel = it)
+                    onValueChange = { ch ->
+                        settings.value = s.copy(healChannel = ch)
+                        // 选择未授权通道 → 立即发起权限申请
+                        if (ch == 1 && !WifiHealer.isShizukuAvailable()) {
+                            val a = context.applicationContext as? ToolboxApp
+                            if (a != null) {
+                                checkShizukuUI(a, onGranted = { channelRefresh++ })
+                            }
+                        }
+                        if (ch == 2) {
+                            val a = context.applicationContext as? ToolboxApp
+                            if (a?.aidl?.ipc == null) {
+                                try {
+                                    a?.aidl?.startAIDLServiceRoot()
+                                } catch (_: Exception) {
+                                }
+                            }
+                        }
                     },
                     title = { Text(stringResource(R.string.guard_heal_channel)) },
                     summary = { Text("${channelValues[s.healChannel]} · $availability") },
@@ -1000,6 +1219,45 @@ private fun GuardSettingsPage(settings: MutableState<GuardSettings>, app: Toolbo
                     icon = { Icon(Icons.Filled.Notifications, null) }
                 )
             }
+
+            // ---- 日志 ----
+            item { PreferenceCategory(title = { Text(stringResource(R.string.guard_cat_log)) }) }
+            item {
+                // 记录日志类型（多选，默认全部）
+                Preference(
+                    title = { Text(stringResource(R.string.guard_log_type)) },
+                    summary = { Text(logTypeSummary(s.logLevels)) },
+                    icon = { Icon(Icons.Filled.ReceiptLong, null) },
+                    onClick = { showLogTypeDialog = true }
+                )
+            }
+            item {
+                // 日志保存位置：默认应用私有 log 目录，可选 SAF 文件夹并显示位置
+                val safName = remember(s.logDirUri) {
+                    GuardLogStore.safDirName(context, s.logDirUri)
+                }
+                val dirDisplay = if (s.logDirUri.isBlank()) {
+                    stringResource(
+                        R.string.guard_log_dir_private, GuardLogStore.privateDir(context).path
+                    )
+                } else if (safName != null) {
+                    stringResource(R.string.guard_log_dir_custom, safName)
+                } else {
+                    stringResource(R.string.guard_log_dir_invalid)
+                }
+                Preference(
+                    title = { Text(stringResource(R.string.guard_log_dir)) },
+                    summary = { Text(dirDisplay) },
+                    icon = { Icon(Icons.Filled.Folder, null) },
+                    onClick = { showLogDirDialog = true }
+                )
+            }
+            item {
+                BannerTip(
+                    text = stringResource(R.string.guard_log_dir_tip),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                )
+            }
         }
     }
 
@@ -1032,6 +1290,146 @@ private fun GuardSettingsPage(settings: MutableState<GuardSettings>, app: Toolbo
             }
         )
     }
+
+    // ---- 记录日志类型对话框（多选，默认全部） ----
+    if (showLogTypeDialog) {
+        var levels by remember { mutableIntStateOf(s.logLevels) }
+        AlertDialog(
+            onDismissRequest = { showLogTypeDialog = false },
+            title = { Text(stringResource(R.string.guard_log_type)) },
+            text = {
+                Column {
+                    Text(
+                        stringResource(R.string.guard_log_type_tip),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    val entries = listOf(
+                        0 to stringResource(R.string.guard_level_info),
+                        1 to stringResource(R.string.guard_level_warn),
+                        2 to stringResource(R.string.guard_level_error),
+                        3 to stringResource(R.string.guard_level_heal)
+                    )
+                    entries.forEach { (bit, label) ->
+                        FilterChip(
+                            selected = levels and (1 shl bit) != 0,
+                            onClick = { levels = levels xor (1 shl bit) },
+                            label = { Text(label) },
+                            modifier = Modifier.padding(vertical = 2.dp)
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    settings.value = s.copy(logLevels = levels)
+                    showLogTypeDialog = false
+                }) { Text(stringResource(R.string.btn_ok)) }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = { levels = 0b1111 }) {
+                        Text(stringResource(R.string.guard_log_filter_all))
+                    }
+                    TextButton(onClick = { showLogTypeDialog = false }) {
+                        Text(stringResource(R.string.btn_cancel))
+                    }
+                }
+            }
+        )
+    }
+
+    // ---- 日志保存位置对话框 ----
+    if (showLogDirDialog) {
+        AlertDialog(
+            onDismissRequest = { showLogDirDialog = false },
+            title = { Text(stringResource(R.string.guard_log_dir)) },
+            text = {
+                Column {
+                    Text(
+                        if (s.logDirUri.isBlank()) stringResource(
+                            R.string.guard_log_dir_private, GuardLogStore.privateDir(context).path
+                        )
+                        else stringResource(
+                            R.string.guard_log_dir_custom,
+                            GuardLogStore.safDirName(context, s.logDirUri) ?: "?"
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    TextButton(onClick = {
+                        settings.value = s.copy(logDirUri = "")
+                        showLogDirDialog = false
+                    }) {
+                        Icon(Icons.Filled.Folder, null, Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(stringResource(R.string.guard_log_dir_use_private))
+                    }
+                    TextButton(onClick = {
+                        showLogDirDialog = false
+                        try {
+                            dirLauncher.launch(null)
+                        } catch (_: Exception) {
+                        }
+                    }) {
+                        Icon(Icons.Filled.DriveFileMove, null, Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(stringResource(R.string.guard_log_dir_pick))
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showLogDirDialog = false }) {
+                    Text(stringResource(R.string.btn_close))
+                }
+            }
+        )
+    }
+}
+
+/** 自定义档动作 id → 本地化名称 */
+@Composable
+private fun customActionLabel(actionId: String): String = stringResource(
+    when (actionId) {
+        "reassociate" -> R.string.guard_action_reassociate
+        "reconnect" -> R.string.guard_action_reconnect
+        "disable+enable" -> R.string.guard_action_disable_enable
+        "cmd connect" -> R.string.guard_action_cmd_connect
+        else -> R.string.guard_action_wifi_cycle
+    }
+)
+
+/** 自定义档动作 id → 本地化说明 */
+@Composable
+private fun customActionTip(actionId: String): String = stringResource(
+    when (actionId) {
+        "reassociate" -> R.string.guard_action_reassociate_tip
+        "reconnect" -> R.string.guard_action_reconnect_tip
+        "disable+enable" -> R.string.guard_action_disable_enable_tip
+        "cmd connect" -> R.string.guard_action_cmd_connect_tip
+        else -> R.string.guard_action_wifi_cycle_tip
+    }
+)
+
+/** 记录日志类型 → 摘要文本（全部 / 用 · 连接的类型名） */
+@Composable
+private fun logTypeSummary(mask: Int): String {
+    if (mask == 0) return stringResource(R.string.guard_log_type_none)
+    if (mask == 0b1111) return stringResource(R.string.guard_log_filter_all)
+    // stringResource 需在 Composable 上下文直接调用，先取值再拼列表
+    val info = stringResource(R.string.guard_level_info)
+    val warn = stringResource(R.string.guard_level_warn)
+    val error = stringResource(R.string.guard_level_error)
+    val heal = stringResource(R.string.guard_level_heal)
+    val names = listOfNotNull(
+        if (mask and 1 != 0) info else null,
+        if (mask and 2 != 0) warn else null,
+        if (mask and 4 != 0) error else null,
+        if (mask and 8 != 0) heal else null
+    )
+    return names.joinToString(" · ")
 }
 
 private fun toggleMask(current: Int, bit: Int, on: Boolean): Int =
@@ -1147,14 +1545,18 @@ private fun StatsPage(app: ToolboxApp?) {
             }
         }
 
-        // ---- 事件历史 ----
+        // ---- 事件历史（标题卡 + 每条事件独立 item，修复长列表布局异常） ----
         item {
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp, vertical = 4.dp)
             ) {
-                Column(Modifier.padding(16.dp)) {
+                Column(
+                    Modifier.padding(
+                        start = 16.dp, end = 8.dp, top = 12.dp, bottom = 12.dp
+                    )
+                ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -1163,37 +1565,51 @@ private fun StatsPage(app: ToolboxApp?) {
                         Text(
                             stringResource(R.string.guard_stat_events),
                             style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.weight(1f)
                         )
-                        TextButton(onClick = { stats.reset() }) {
+                        TextButton(
+                            onClick = { stats.reset() },
+                            contentPadding = PaddingValues(horizontal = 8.dp)
+                        ) {
                             Text(stringResource(R.string.guard_stat_reset))
                         }
                     }
-                    Spacer(Modifier.height(4.dp))
                     if (stats.events.isEmpty()) {
                         Text(
                             stringResource(R.string.guard_no_log),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                    } else {
-                        stats.events.take(30).forEach { e ->
-                            Column(Modifier.padding(vertical = 4.dp)) {
-                                Text(
-                                    "${GuardStats.formatTime(e.time)}  ${e.ssid}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.Medium
-                                )
-                                Text(
-                                    "${e.actions} → ${if (e.recovered) "✓" else "✗"} ${e.costMs / 1000}s (${e.failedProbes})",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontFamily = FontFamily.Monospace,
-                                    color = if (e.recovered) MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.error
-                                )
-                            }
-                        }
+                    }
+                }
+            }
+        }
+        stats.events.take(30).forEachIndexed { index, e ->
+            item(key = "event-$index-${e.time}") {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 2.dp)
+                ) {
+                    Column(
+                        Modifier.padding(
+                            start = 16.dp, end = 16.dp, top = 8.dp, bottom = 8.dp
+                        )
+                    ) {
+                        Text(
+                            "${GuardStats.formatTime(e.time)}  ${e.ssid}",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Text(
+                            "${e.actions} → ${if (e.recovered) "✓" else "✗"} ${e.costMs / 1000}s (${e.failedProbes})",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = if (e.recovered) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.error
+                        )
                     }
                 }
             }

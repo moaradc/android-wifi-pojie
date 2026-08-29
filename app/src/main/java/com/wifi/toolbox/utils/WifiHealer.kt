@@ -88,6 +88,7 @@ class WifiHealer(
      * 执行自愈动作序列。
      *
      * @param verify 每个动作后的即时验证（轻量单项探测，返回 true 则停止升压）
+     * @param actionStats 历史动作统计（高成功率档动态选优的依据）
      * @return 实际执行的动作列表（按执行顺序）
      */
     suspend fun heal(
@@ -95,9 +96,10 @@ class WifiHealer(
         ssid: String,
         netId: Int,
         verify: suspend () -> Boolean,
-        log: (String) -> Unit
+        log: (String) -> Unit,
+        actionStats: Map<String, Pair<Int, Int>> = emptyMap()
     ): List<String> {
-        val plan = planActions(settings.healStrategy)
+        val plan = planActions(settings, actionStats)
         val executed = mutableListOf<String>()
         for (action in plan) {
             val start = System.currentTimeMillis()
@@ -136,9 +138,19 @@ class WifiHealer(
         return executed
     }
 
-    /** 根据策略档位生成动作计划（由轻到重） */
-    fun planActions(strategy: Int): List<String> {
-        return when (strategy) {
+    /**
+     * 根据策略档位生成动作计划（由轻到重）。
+     *
+     * 档位 5（自定义）：[GuardSettings.customHealActions] 中"+"连接的动作 id，
+     * 按内置顺序重排（保证由轻到重）；空/无效回退标准档。
+     * 档位 6（高成功率）：从历史统计中取累计成功最高的单一动作，
+     * 直接执行该动作（已验证对本机最有效）；无统计时回退标准档。
+     */
+    fun planActions(
+        settings: GuardSettings,
+        actionStats: Map<String, Pair<Int, Int>> = emptyMap()
+    ): List<String> {
+        return when (settings.healStrategy) {
             0 -> emptyList()                       // 只检测不重连
             1 -> listOf(HealActions.REASSOCIATE)   // 轻量
             2 -> listOf(HealActions.RECONNECT)     // 标准
@@ -155,8 +167,46 @@ class WifiHealer(
                 HealActions.CMD_CONNECT,
                 HealActions.WIFI_CYCLE
             )
+            5 -> parseCustomActions(settings.customHealActions)
+                .ifEmpty { listOf(HealActions.RECONNECT) }
+            6 -> bestActionFrom(actionStats)
+                ?.let { listOf(it) }
+                ?: listOf(HealActions.RECONNECT)
             else -> listOf(HealActions.RECONNECT)
         }
+    }
+
+    /**
+     * 解析自定义动作串："," 分隔（动作 id 中含"+"/空格，不能用其作分隔符），
+     * 过滤非法 id，按由轻到重的固定顺序重排
+     */
+    private fun parseCustomActions(raw: String): List<String> {
+        if (raw.isBlank()) return emptyList()
+        val chosen = raw.split(',').map { it.trim() }.filter {
+            it in setOf(
+                HealActions.REASSOCIATE, HealActions.RECONNECT,
+                HealActions.DISABLE_ENABLE, HealActions.CMD_CONNECT,
+                HealActions.WIFI_CYCLE
+            )
+        }.toSet()
+        // 固定由轻到重顺序输出
+        return listOf(
+            HealActions.REASSOCIATE, HealActions.RECONNECT,
+            HealActions.DISABLE_ENABLE, HealActions.CMD_CONNECT,
+            HealActions.WIFI_CYCLE
+        ).filter { it in chosen }
+    }
+
+    /** 累计成功次数最高的动作（次键成功率）；无数据返回 null */
+    private fun bestActionFrom(stats: Map<String, Pair<Int, Int>>): String? {
+        return stats.entries
+            .filter { it.value.second > 0 }
+            .maxWithOrNull(
+                compareByDescending<Map.Entry<String, Pair<Int, Int>>> { it.value.second }
+                    .thenByDescending {
+                        if (it.value.first > 0) it.value.second.toFloat() / it.value.first else 0f
+                    }
+            )?.key
     }
 
     private suspend fun executeAction(

@@ -153,4 +153,30 @@ class GuardStats(context: Context) {
         fun formatTime(time: Long): String =
             SimpleDateFormat("MM-dd HH:mm:ss", Locale.getDefault()).format(Date(time))
     }
+
+    /**
+     * 高成功率档依据：累计自愈成功次数最高的动作。
+     *
+     * 排序规则（主键：累计成功次数，次键：成功率）——
+     * "成功 50/100" 排在 "成功 2/2" 之前：样本量大的动作更可信，
+     * 避免只试过一次的动作因 100% 成功率而垄断选择。
+     * 无任何统计数据时返回 null（下拉菜单中不展示该档位）。
+     */
+    fun bestAction(): String? {
+        return actionStats.entries
+            .filter { it.value.second > 0 }
+            .maxWithOrNull(
+                compareByDescending<Map.Entry<String, Pair<Int, Int>>> { it.value.second }
+                    .thenByDescending {
+                        if (it.value.first > 0) it.value.second.toFloat() / it.value.first else 0f
+                    }
+            )?.key
+    }
+
+    /** 高成功率档的动作成功率（百分比，供 UI 展示）；无数据返回 -1 */
+    fun bestActionRate(action: String?): Int {
+        if (action == null) return -1
+        val v = actionStats[action] ?: return -1
+        return if (v.first > 0) v.second * 100 / v.first else -1
+    }
 }
