@@ -44,14 +44,18 @@ fun rememberGuardSettings(context: Context): MutableState<GuardSettings> {
                         putInt(GuardSettings.HEAL_CHANNEL_KEY, s.healChannel)
                         putBoolean(GuardSettings.START_ON_BOOT_KEY, s.startOnBoot)
                     }
-                    // 热加载通知
-                    try {
-                        context.startService(
-                            android.content.Intent(
-                                context, com.wifi.toolbox.services.GuardService::class.java
-                            ).apply { action = com.wifi.toolbox.services.GuardService.ACTION_RELOAD }
-                        )
-                    } catch (_: Exception) {
+                    // 热加载通知：仅在服务已在运行时通知重载。
+                    // 服务未运行时绝不能因设置写入而拉起服务，
+                    // 否则仅打开设置页（滑块首次组合触发 LaunchedEffect）就会启动守护。
+                    if (com.wifi.toolbox.services.GuardState.running) {
+                        try {
+                            context.startService(
+                                android.content.Intent(
+                                    context, com.wifi.toolbox.services.GuardService::class.java
+                                ).apply { action = com.wifi.toolbox.services.GuardService.ACTION_RELOAD }
+                            )
+                        } catch (_: Exception) {
+                        }
                     }
                 }
             override fun component1() = value

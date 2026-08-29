@@ -84,7 +84,7 @@ object NetProber {
             }
         }
         if (modes and GuardSettings.PROBE_DNS != 0) {
-            jobs += async { probeDns(settings.probeTimeoutMs) }
+            jobs += async { probeDns(wifiNetwork, settings.probeTimeoutMs) }
         }
         if (modes and GuardSettings.PROBE_ICMP != 0) {
             jobs += async { probeIcmp(shellExecutor) }
@@ -165,19 +165,26 @@ object NetProber {
     }
 
     /**
-     * DNS 探测：通过 WiFi 网络解析域名。域名全挂但 HTTP 通 = DNS 服务器问题，
-     * HTTP 也挂 = 链路问题。给根因定位提供维度。
+     * DNS 探测：通过 [Network.getAllByName] 绑定 WiFi 网络解析域名。
+     * 若不绑网，WiFi 假连接、系统默认路由已回落蜂窝时，
+     * 默认解析会走蜂窝成功，把"WiFi 外网断"误判为在线；
+     * 绑定后与 HTTP 探测同源，才能暴露运营商 DNS 黑洞/劫持类故障。
      */
-    private suspend fun probeDns(timeoutMs: Int): ProbeResult =
+    private suspend fun probeDns(wifiNetwork: Network?, timeoutMs: Int): ProbeResult =
         withTimeoutOrNull(timeoutMs.toLong() + 1500) {
             val start = System.currentTimeMillis()
             try {
-                // 注意：应用层 API 无法直接绑定网络做 DNS，此处用系统默认解析。
-                // 若 WiFi 已是系统默认网络（绝大多数场景）结果可信；
-                // 与 HTTP 探测互为佐证，单项目失败不直接触发自愈（有防抖兜底）。
+                // 域名全挂但 HTTP 通 = DNS 服务器问题；HTTP 也挂 = 链路问题。
+                // 两个维度给根因定位提供依据。
                 val resolved = DNS_TARGETS.map { target ->
                     try {
-                        val addrs = InetAddress.getAllByName(target)
+                        // 绑定 WiFi 网络解析（Network.getAllByName），
+                        // 防止蜂窝回落时 DNS 走蜂窝成功导致误判在线
+                        val addrs = if (wifiNetwork != null) {
+                            wifiNetwork.getAllByName(target)
+                        } else {
+                            InetAddress.getAllByName(target)
+                        }
                         target to addrs.firstOrNull()?.hostAddress
                     } catch (e: Exception) {
                         target to null

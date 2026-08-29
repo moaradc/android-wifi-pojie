@@ -4,10 +4,16 @@ on:
   push:
     paths:
       - 'CHANGELOG.md'
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -33,35 +39,58 @@ jobs:
         run: chmod +x gradlew
 
       - name: Decode Keystore
-        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > release.keystore
+        run: |
+          # secrets 未配置时生成占位文件（后面会走回退签名）
+          if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
+            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > release.keystore
+          else
+            echo "placeholder" > release.keystore
+          fi
 
       - name: Build APKs
         run: |
-          # 先尝试用仓库 secrets 的正式签名构建；keystore 与新版 JDK 不兼容时回退 debug 签名
+          # 先尝试用仓库 secrets 的正式签名构建；keystore 缺失/与新版 JDK 不兼容时
+          # 回退为 debug 签名的 Release APK（保证产物可直接安装）
           if ! ./gradlew assembleRelease \
             -Pandroid.injected.signing.store.file=$GITHUB_WORKSPACE/release.keystore \
             -Pandroid.injected.signing.store.password='${{ secrets.STORE_PASSWORD }}' \
             -Pandroid.injected.signing.key.alias='${{ secrets.KEY_ALIAS }}' \
             -Pandroid.injected.signing.key.password='${{ secrets.KEY_PASSWORD }}'; then
             echo "::warning::正式签名构建失败，回退为 debug 签名构建 Release APK"
+            rm -f app/build/outputs/apk/release/*.apk
             ./gradlew assembleRelease
+
+            APKSIGNER=$(find $ANDROID_HOME/build-tools -name apksigner | sort -V | tail -1)
+            ZIPALIGN=$(find $ANDROID_HOME/build-tools -name zipalign | sort -V | tail -1)
+            if [ ! -f ~/.android/debug.keystore ]; then
+              keytool -genkeypair -keystore ~/.android/debug.keystore -alias androiddebugkey \
+                -storepass android -keypass android -dname "CN=Android Debug,O=Android,C=US" \
+                -keyalg RSA -keysize 2048 -validity 10000
+            fi
+            UNSIGNED=$(find app/build/outputs/apk/release/ -name "*unsigned*.apk" | head -1)
+            if [ -n "$UNSIGNED" ] && [ -x "$APKSIGNER" ]; then
+              "$ZIPALIGN" -f 4 "$UNSIGNED" release-aligned.apk
+              "$APKSIGNER" sign --ks ~/.android/debug.keystore --ks-pass pass:android \
+                --ks-key-alias androiddebugkey --key-pass pass:android release-aligned.apk
+              mv -f release-aligned.apk "$UNSIGNED"
+              echo "已用 debug 密钥完成回退签名"
+            fi
           fi
           
           ./gradlew assembleDebug
 
       - name: Rename and Collect APKs
         run: |
-          find app/build/outputs/apk/release/ -name "*.apk" -exec mv {} "release-${{ env.VERSION_TAG }}.apk" \;
-          find app/build/outputs/apk/debug/ -name "*.apk" -exec mv {} "debug-${{ env.VERSION_TAG }}.apk" \;
+          find app/build/outputs/apk/release/ -name "*.apk" -exec mv {} "wifi-toolbox-${{ env.VERSION_TAG }}-release.apk" \;
+          find app/build/outputs/apk/debug/ -name "*.apk" -exec mv {} "wifi-toolbox-${{ env.VERSION_TAG }}-debug.apk" \;
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.VERSION_TAG }}
           body_path: release_body.md
-          discussion_category_name: "Announcements"
           files: |
-            release-${{ env.VERSION_TAG }}.apk
-            debug-${{ env.VERSION_TAG }}.apk
+            wifi-toolbox-${{ env.VERSION_TAG }}-release.apk
+            wifi-toolbox-${{ env.VERSION_TAG }}-debug.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

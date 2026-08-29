@@ -10,6 +10,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.IBinder
@@ -151,16 +152,20 @@ class GuardService : Service() {
      */
     private suspend fun runOneCheck(manual: Boolean = false) = healMutex.withLock {
         if (settings.onlyWhenWifiConnected) {
-            val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-            @Suppress("DEPRECATION")
-            val connected = try {
-                wm.connectionInfo?.ssid != null &&
-                        wm.connectionInfo.ssid != "<unknown ssid>"
-            } catch (_: Exception) {
-                false
-            }
+            // 关键：用 ConnectivityManager 的 allNetworks 判定 WiFi 连接（免定位权限），
+            // 与 NetProber 绑网探测同源。原实现用 connectionInfo.ssid 判断，
+            // 无 ACCESS_FINE_LOCATION 运行时授权时 SSID 恒为 <unknown ssid>，
+            // 会导致 WiFi 明明已连接却被误判为"未连接"而永久跳过检测。
+            val cm = applicationContext
+                .getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val connected = NetProber.findWifiNetwork(cm) != null
             if (!connected) {
-                if (manual) log(getString(R.string.guard_log_wifi_not_connected))
+                // 防刷屏：仅手动检测或状态切换时打日志
+                if (manual || GuardState.currentState != GuardState.STATE_LINK_DOWN) {
+                    log(getString(R.string.guard_log_wifi_not_connected))
+                }
+                GuardState.lastCheckTime = System.currentTimeMillis()
+                GuardState.currentState = GuardState.STATE_LINK_DOWN
                 return@withLock
             }
         }
@@ -215,6 +220,54 @@ class GuardService : Service() {
         performHeal(verdict)
     }
 
+    /**
+     * 获取当前 WiFi 身份（SSID + networkId）。
+     *
+     * Android 9+ 应用层 WifiInfo 的 SSID 需要 ACCESS_FINE_LOCATION 运行时授权
+     * 且定位服务开启，否则返回 <unknown ssid>；netId 在部分 ROM 上同样受限。
+     * 特权通道（Shizuku/Root AIDL）不受此限制，作为兑底。
+     */
+    private suspend fun wifiIdentity(): Pair<String, Int> {
+        var ssid = ""
+        var netId = -1
+        try {
+            val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+            @Suppress("DEPRECATION")
+            val info = wm.connectionInfo
+            val raw = info?.ssid?.removeSurrounding("\"").orEmpty()
+            if (raw.isNotEmpty() && raw != "<unknown ssid>") ssid = raw
+            if (info != null) netId = info.networkId
+        } catch (_: Exception) {
+        }
+        if (ssid.isEmpty() || netId == -1) {
+            try {
+                // Android 11+：cmd wifi status 输出形如 Current network: #0 "SSID"
+                if (ssid.isEmpty()) {
+                    val status = healer.shellExec("cmd wifi status").output
+                    ssid = Regex("Current network:.*?\"([^\"]+)\"")
+                        .find(status)?.groupValues?.get(1)
+                        ?.removeSurrounding("\"")?.trim().orEmpty()
+                }
+                if (ssid.isEmpty() || netId == -1) {
+                    // 通用兑底：dumpsys wifi 的 mWifiInfo 行（含 SSID 与 Net ID）
+                    val dump = healer.shellExec("dumpsys wifi").output
+                    if (ssid.isEmpty()) {
+                        ssid = Regex("mWifiInfo SSID: ([^,\\r\\n]+)")
+                            .find(dump)?.groupValues?.get(1)
+                            ?.removeSurrounding("\"")?.trim().orEmpty()
+                        if (ssid == "<unknown ssid>") ssid = ""
+                    }
+                    if (netId == -1) {
+                        netId = Regex("mWifiInfo.*?Net ID: (\\d+)")
+                            .find(dump)?.groupValues?.get(1)?.toIntOrNull() ?: -1
+                    }
+                }
+            } catch (_: Exception) {
+            }
+        }
+        return ssid to netId
+    }
+
     private suspend fun performHeal(verdict: com.wifi.toolbox.utils.ProbeVerdict) {
         // 指数退避：连续失败后成倍等待
         if (consecutiveHealFails > 0) {
@@ -226,19 +279,9 @@ class GuardService : Service() {
         }
 
         val app = applicationContext as ToolboxApp
-        val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-        @Suppress("DEPRECATION")
-        val ssid = try {
-            wm.connectionInfo?.ssid?.removeSurrounding("\"").orEmpty()
-        } catch (_: Exception) {
-            ""
-        }
-        @Suppress("DEPRECATION")
-        val netId = try {
-            wm.connectionInfo?.networkId ?: -1
-        } catch (_: Exception) {
-            -1
-        }
+        // WiFi 身份获取：无定位权限时应用层 WifiInfo 拿不到真实 SSID，
+        // 依次尝试 应用层 → cmd wifi status（特权）→ dumpsys wifi（特权）
+        val (ssid, netId) = wifiIdentity()
 
         GuardState.lastHealSsid = ssid
         log(getString(R.string.guard_log_healing, ssid.ifEmpty { "?" }))

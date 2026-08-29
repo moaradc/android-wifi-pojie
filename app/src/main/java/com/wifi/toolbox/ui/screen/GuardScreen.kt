@@ -389,7 +389,11 @@ private fun GuardSettingsPage(settings: MutableState<GuardSettings>) {
                     icon = { Icon(Icons.Filled.Timer, null) }
                 )
                 LaunchedEffect(state.value) {
-                    settings.value = s.copy(probeTimeoutMs = state.value.toInt())
+                    val v = state.value.toInt()
+                    // 等值守卫：首次组合不写入，仅用户真正拖动后才持久化
+                    if (v != s.probeTimeoutMs) {
+                        settings.value = s.copy(probeTimeoutMs = v)
+                    }
                 }
             }
             item {
@@ -403,7 +407,10 @@ private fun GuardSettingsPage(settings: MutableState<GuardSettings>) {
                     icon = { Icon(Icons.Filled.FilterAlt, null) }
                 )
                 LaunchedEffect(state.value) {
-                    settings.value = s.copy(failThreshold = state.value.toInt())
+                    val v = state.value.toInt()
+                    if (v != s.failThreshold) {
+                        settings.value = s.copy(failThreshold = v)
+                    }
                 }
             }
 
@@ -506,7 +513,10 @@ private fun GuardSettingsPage(settings: MutableState<GuardSettings>) {
                     icon = { Icon(Icons.Filled.Timer, null) }
                 )
                 LaunchedEffect(state.value) {
-                    settings.value = s.copy(healVerifyTimeoutSec = state.value.toInt())
+                    val v = state.value.toInt()
+                    if (v != s.healVerifyTimeoutSec) {
+                        settings.value = s.copy(healVerifyTimeoutSec = v)
+                    }
                 }
             }
             item {
@@ -520,7 +530,10 @@ private fun GuardSettingsPage(settings: MutableState<GuardSettings>) {
                     icon = { Icon(Icons.Filled.HourglassTop, null) }
                 )
                 LaunchedEffect(state.value) {
-                    settings.value = s.copy(healCooldownBaseSec = state.value.toInt())
+                    val v = state.value.toInt()
+                    if (v != s.healCooldownBaseSec) {
+                        settings.value = s.copy(healCooldownBaseSec = v)
+                    }
                 }
             }
             item {
