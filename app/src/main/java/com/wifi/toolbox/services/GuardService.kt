@@ -13,7 +13,9 @@ import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.wifi.WifiManager
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import androidx.core.app.NotificationCompat
 import com.wifi.toolbox.R
 import com.wifi.toolbox.ToolboxApp
@@ -101,7 +103,12 @@ class GuardService : Service() {
                 // 手动"立即检测"
                 scope.launch { runOneCheck(manual = true) }
             }
-            ACTION_RELOAD -> reloadSettings()
+            ACTION_RELOAD -> {
+                reloadSettings()
+                // 通知样式随设置即时重建：如"常驻守护通知"开关切换后，
+                // 前台通知在 标准显示/静默最低优先级 之间立即切换
+                startAsForeground()
+            }
         }
 
         startAsForeground()
@@ -400,21 +407,7 @@ class GuardService : Service() {
     // ==================== 通知 ====================
 
     private fun createChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                getString(R.string.guard_name),
-                NotificationManager.IMPORTANCE_MIN
-            )
-            val eventChannel = NotificationChannel(
-                EVENT_CHANNEL_ID,
-                getString(R.string.guard_notif_event_channel),
-                NotificationManager.IMPORTANCE_DEFAULT
-            )
-            val manager = getSystemService(NotificationManager::class.java)
-            manager?.createNotificationChannel(channel)
-            manager?.createNotificationChannel(eventChannel)
-        }
+        createChannelStatic(this)
     }
 
     private fun buildNotification(text: String?, silent: Boolean = false): android.app.Notification {
@@ -459,6 +452,18 @@ class GuardService : Service() {
         scope.cancel()
         GuardState.running = false
         GuardState.currentState = GuardState.STATE_IDLE
+        // "常驻守护通知"开启：服务停止后仍保留"未运行"常驻通知（开关关闭则由系统
+        // 随前台服务移除通知，无需处理）。延迟发出：避开系统移除前台通知的时序，
+        // 确保新通知不被连带移除
+        if (settings.showPersistentNotification) {
+            Handler(Looper.getMainLooper()).postDelayed({
+                try {
+                    val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                    nm.notify(NOTIF_ID, buildIdleNotification(this))
+                } catch (_: Exception) {
+                }
+            }, 600)
+        }
     }
 
     companion object {
@@ -469,6 +474,75 @@ class GuardService : Service() {
         const val ACTION_STOP = "com.wifi.toolbox.guard.STOP"
         const val ACTION_RUN_CHECK = "com.wifi.toolbox.guard.CHECK"
         const val ACTION_RELOAD = "com.wifi.toolbox.guard.RELOAD"
+
+        private fun createChannelStatic(context: Context) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val channel = NotificationChannel(
+                    CHANNEL_ID,
+                    context.getString(R.string.guard_name),
+                    NotificationManager.IMPORTANCE_MIN
+                )
+                val eventChannel = NotificationChannel(
+                    EVENT_CHANNEL_ID,
+                    context.getString(R.string.guard_notif_event_channel),
+                    NotificationManager.IMPORTANCE_DEFAULT
+                )
+                val manager =
+                    context.getSystemService(NotificationManager::class.java)
+                manager?.createNotificationChannel(channel)
+                manager?.createNotificationChannel(eventChannel)
+            }
+        }
+
+        /**
+         * 服务未运行时的常驻通知（仅"常驻守护通知"开关开启时显示）：
+         * 点击进入守护页，可快速重新开启守护。
+         */
+        fun buildIdleNotification(context: Context): android.app.Notification {
+            createChannelStatic(context)
+            val intent = Intent(context, com.wifi.toolbox.ui.MainActivity::class.java).apply {
+                putExtra("target", "Guard")
+            }
+            val pendingIntent = PendingIntent.getActivity(
+                context, 0, intent, PendingIntent.FLAG_IMMUTABLE
+            )
+            return NotificationCompat.Builder(context, CHANNEL_ID)
+                .setContentTitle(context.getString(R.string.guard_name))
+                .setContentText(context.getString(R.string.guard_notif_stopped))
+                .setSmallIcon(R.drawable.ic_launcher_foreground)
+                .setContentIntent(pendingIntent)
+                .setOngoing(true)
+                .setPriority(NotificationCompat.PRIORITY_MIN)
+                .setSilent(true)
+                .build()
+        }
+
+        /**
+         * 服务未运行时同步常驻通知状态：
+         * 开关开启 → 显示"未运行"常驻通知（无论守护开关是否开）
+         * 开关关闭 → 移除通知。
+         * 服务运行中不介入（前台通知由服务自身管理）。
+         */
+        fun syncIdleNotification(context: Context) {
+            if (GuardState.running) return
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            val prefs = context.getSharedPreferences(
+                GuardSettings.PREFS_NAME, Context.MODE_PRIVATE
+            )
+            val enabled = try {
+                GuardSettings.from(prefs).showPersistentNotification
+            } catch (_: Exception) {
+                true
+            }
+            if (enabled) {
+                try {
+                    nm.notify(NOTIF_ID, buildIdleNotification(context))
+                } catch (_: Exception) {
+                }
+            } else {
+                nm.cancel(NOTIF_ID)
+            }
+        }
 
         fun start(context: Context) {
             context.startForegroundService(Intent(context, GuardService::class.java))

@@ -57,31 +57,89 @@ class WifiHealer(
 ) {
 
     /**
-     * 当前可用的 shell 执行通道（供 ICMP 探测复用）：Shizuku → Root AIDL → 本地 sh。
+     * 当前可用的 shell 执行通道（供 ICMP 探测/自愈诊断复用）。
+     *
+     * 通道选择**遵循设置的「执行通道」**（与自愈动作共用同一设置项）：
+     * - 自动：Shizuku → Root AIDL → 本地 sh 逐级回退
+     * - 仅 Shizuku / 仅 Root AIDL：指定通道不可用时降级本地 sh（如实记录降级）
+     * - 仅系统 API：无特权 shell，直接本地 sh（应用沙箱内 ping 依 ping_group_range 仍可执行）
+     *
      * 返回 [CommandRunner.ShellOutcome]，携带实际使用的通道名（写入全局状态供 UI 展示，
      * 解决"已授权 Shizuku 但不知道是否真的被使用"的可见性问题）。
      */
     suspend fun shellExec(command: String): CommandRunner.ShellOutcome {
-        val a = app ?: return CommandRunner.ShellOutcome("", -1, GuardChannels.SHELL)
-        val outcome: CommandRunner.ShellOutcome = try {
-            if (isShizukuAvailable()) {
-                val r = ShizukuUtil.executeCommandSync(command)
-                CommandRunner.ShellOutcome(r.output, r.exitCode, GuardChannels.SHIZUKU)
-            } else if (a.aidl.ipc != null) {
-                val r = AidlServiceHelper.executeCommandSync(a, command)
-                CommandRunner.ShellOutcome(r.output, r.exitCode, GuardChannels.ROOT_AIDL)
-            } else {
-                val process = ProcessBuilder("sh", "-c", command)
-                    .redirectErrorStream(true).start()
-                val out = process.inputStream.bufferedReader().readText()
-                process.waitFor()
-                CommandRunner.ShellOutcome(out, process.exitValue(), GuardChannels.SHELL)
+        val outcome = execViaChannel(command)
+        GuardState.lastShellChannel = outcome.channel
+        return outcome
+    }
+
+    private suspend fun execViaChannel(command: String): CommandRunner.ShellOutcome {
+        val a = app ?: return localShell(command)
+        return when (try {
+            a.guardHealChannel()
+        } catch (_: Exception) {
+            0
+        }) {
+            1 -> if (isShizukuAvailable()) {
+                try {
+                    val r = ShizukuUtil.executeCommandSync(command)
+                    CommandRunner.ShellOutcome(r.output, r.exitCode, GuardChannels.SHIZUKU)
+                } catch (_: Exception) {
+                    localShell(command)
+                }
+            } else localShell(command)
+
+            2 -> if (aidlReady()) {
+                try {
+                    val r = AidlServiceHelper.executeCommandSync(a, command)
+                    CommandRunner.ShellOutcome(r.output, r.exitCode, GuardChannels.ROOT_AIDL)
+                } catch (_: Exception) {
+                    localShell(command)
+                }
+            } else localShell(command)
+
+            3 -> localShell(command)   // 仅系统 API：无特权 shell，本地执行
+
+            else -> {
+                // 自动：Shizuku → Root AIDL → 本地 sh
+                try {
+                    if (isShizukuAvailable()) {
+                        val r = ShizukuUtil.executeCommandSync(command)
+                        CommandRunner.ShellOutcome(r.output, r.exitCode, GuardChannels.SHIZUKU)
+                    } else if (aidlReady()) {
+                        val r = AidlServiceHelper.executeCommandSync(a, command)
+                        CommandRunner.ShellOutcome(r.output, r.exitCode, GuardChannels.ROOT_AIDL)
+                    } else {
+                        localShell(command)
+                    }
+                } catch (_: Exception) {
+                    localShell(command)
+                }
             }
+        }
+    }
+
+    /** Root AIDL 服务是否在线（连接状态读取可能抛异常，统一吞掉） */
+    private fun aidlReady(): Boolean {
+        val a = app ?: return false
+        return try {
+            a.aidl.ipc != null
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /** 应用沙箱内直接执行（ping 依 Android init.rc 的 ping_group_range 全 uid 放开仍可用） */
+    private fun localShell(command: String): CommandRunner.ShellOutcome {
+        return try {
+            val process = ProcessBuilder("sh", "-c", command)
+                .redirectErrorStream(true).start()
+            val out = process.inputStream.bufferedReader().readText()
+            process.waitFor()
+            CommandRunner.ShellOutcome(out, process.exitValue(), GuardChannels.SHELL)
         } catch (_: Exception) {
             CommandRunner.ShellOutcome("", -1, GuardChannels.SHELL)
         }
-        GuardState.lastShellChannel = outcome.channel
-        return outcome
     }
 
     /**

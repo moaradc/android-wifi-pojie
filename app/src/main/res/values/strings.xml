@@ -201,7 +201,7 @@
     <string name="guard_notify_fail">重连失败通知</string>
     <string name="guard_notify_fail_tip">重连后仍不通时发系统通知</string>
     <string name="guard_notify_persistent">常驻守护通知</string>
-    <string name="guard_notify_persistent_tip">前台服务的低优先级常驻通知（关闭后系统可能更早回收服务）</string>
+    <string name="guard_notify_persistent_tip">开启后无论守护是否运行都常驻显示通知（守护停止时显示“未运行”可点击进入）；关闭时仅守护运行中显示前台通知（系统前台服务要求）</string>
 
     <string name="guard_stat_checks">总检测</string>
     <string name="guard_stat_failures">断网判定</string>
@@ -294,6 +294,13 @@
     <string name="guard_channel_probe">探测</string>
     <string name="guard_channel_heal">自愈</string>
     <string name="guard_channel_copied">已复制通道信息</string>
+    <string name="guard_notif_stopped">守护未运行，点击开启网络守护</string>
+    <string name="guard_channel_tip">特权通道用于自愈动作与 ICMP ping 探测（自动=Shizuku→Root→本地逐级回退，指定通道不可用时降级本地执行并如实显示）；HTTP 204 / DNS / 系统能力位探测走应用层，无需特权。</string>
+    <string name="guard_probe_copied">已复制探测结果</string>
+    <string name="guard_events_file_header">WiFi工具箱 网络守护事件历史</string>
+    <string name="guard_events_copied">已复制 %1$d 条事件</string>
+    <string name="guard_events_cleared">事件历史已清空（统计保留）</string>
+    <string name="guard_no_events">暂无事件</string>
 
     <string name="options">选项</string>
     <string name="about">关于</string>

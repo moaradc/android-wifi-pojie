@@ -90,6 +90,12 @@ class GuardStats(context: Context) {
         persist()
     }
 
+    /** 仅清空事件历史（保留累计统计与动作有效率） */
+    fun clearEvents() {
+        events = emptyList()
+        persist()
+    }
+
     private fun persist() {
         val ev = JSONArray()
         events.take(MAX_EVENTS).forEach { e ->

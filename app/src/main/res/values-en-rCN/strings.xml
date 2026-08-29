@@ -196,7 +196,7 @@
     <string name="guard_notify_fail">Notify on failure</string>
     <string name="guard_notify_fail_tip">System notification when still offline after reconnect</string>
     <string name="guard_notify_persistent">Persistent guard notification</string>
-    <string name="guard_notify_persistent_tip">Low-priority ongoing notification for the foreground service</string>
+    <string name="guard_notify_persistent_tip">When on, the notification stays visible whether or not the guard is running (shows "stopped" when idle, tap to open); when off, only shown while the guard runs (foreground-service requirement)</string>
     <string name="guard_stat_checks">Total checks</string>
     <string name="guard_stat_failures">Offline verdicts</string>
     <string name="guard_stat_heals">Reconnects</string>
@@ -287,6 +287,13 @@
     <string name="guard_channel_probe">Probe</string>
     <string name="guard_channel_heal">Heal</string>
     <string name="guard_channel_copied">Channel info copied</string>
+    <string name="guard_notif_stopped">Guard stopped — tap to open and enable</string>
+    <string name="guard_channel_tip">Privileged channels are used for healing actions and ICMP ping probes (Auto = Shizuku → Root → local shell fallback; an unavailable selected channel falls back to local execution and is shown as such). HTTP 204 / DNS / system-capability probes run on the app layer and need no privilege.</string>
+    <string name="guard_probe_copied">Probe result copied</string>
+    <string name="guard_events_file_header">WiFi Toolbox — Network Guard event history</string>
+    <string name="guard_events_copied">Copied %1$d events</string>
+    <string name="guard_events_cleared">Event history cleared (stats kept)</string>
+    <string name="guard_no_events">No events yet</string>
     <string name="options">more</string>
     <string name="about">about</string>
     <string name="tip_string">Tip: %1$s</string>

@@ -30,6 +30,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
@@ -44,8 +45,10 @@ import com.wifi.toolbox.ui.items.BannerTip
 import com.wifi.toolbox.ui.items.NavContainer
 import com.wifi.toolbox.ui.items.NavPage
 import com.wifi.toolbox.ui.items.checkShizukuUI
+import com.wifi.toolbox.utils.GuardEvent
 import com.wifi.toolbox.utils.GuardLogStore
 import com.wifi.toolbox.utils.GuardStats
+import com.wifi.toolbox.utils.ProbeResult
 import com.wifi.toolbox.utils.StoredLogFile
 import com.wifi.toolbox.utils.WifiHealer
 import com.wifi.toolbox.utils.rememberGuardSettings
@@ -91,7 +94,7 @@ fun GuardScreen(onMenuClick: () -> Unit) {
                 override val selectedIcon = Icons.Filled.QueryStats
                 override val unselectedIcon = Icons.Outlined.QueryStats
                 override val content = @Composable {
-                    StatsPage(app)
+                    StatsPage(app, settings.value.logDirUri)
                 }
             }
         )
@@ -125,6 +128,10 @@ private fun StatusPage(settings: GuardSettings, app: ToolboxApp?) {
             nowMs = System.currentTimeMillis()
         }
     }
+
+    // 打开页面时同步常驻通知：服务未运行时按「常驻守护通知」开关
+    // 显示/移除"未运行"常驻通知（服务运行中的通知由前台服务管理）
+    LaunchedEffect(Unit) { GuardService.syncIdleNotification(context) }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -216,23 +223,7 @@ private fun StatusPage(settings: GuardSettings, app: ToolboxApp?) {
                     lastVerdict?.let { v ->
                         Spacer(Modifier.height(8.dp))
                         v.results.forEach { r ->
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text(
-                                    "${r.mode}",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontFamily = FontFamily.Monospace
-                                )
-                                Text(
-                                    if (r.ok) "✓ ${r.detail}" else "✗ ${r.detail}",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontFamily = FontFamily.Monospace,
-                                    color = if (r.ok) MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.error
-                                )
-                            }
+                            ProbeResultLine(r)
                         }
                     }
                 }
@@ -383,6 +374,91 @@ private fun formatAgo(seconds: Long): String {
         seconds < 60 -> "${seconds}s"
         seconds < 3600 -> "${seconds / 60}m${seconds % 60}s"
         else -> "${seconds / 3600}h${(seconds % 3600) / 60}m"
+    }
+}
+
+/**
+ * 单条探测结果行（HTTP/DNS/ICMP/VALIDATED）：
+ * - 默认单行截断（长 detail 如 ICMP 真实报错不撑爆卡片）
+ * - 点击平滑动画展开完整 detail（可多行）
+ * - 长按复制该项结果（如 "HTTP ✓ 204 116ms"）
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun ProbeResultLine(result: ProbeResult) {
+    val context = LocalContext.current
+    var expanded by remember(result.mode) { mutableStateOf(false) }
+    val statusColor = if (result.ok) MaterialTheme.colorScheme.primary
+    else MaterialTheme.colorScheme.error
+    val mark = if (result.ok) "✓" else "✗"
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .animateContentSize()   // 展开/收起的流畅高度动画
+            .combinedClickable(
+                onClick = { expanded = !expanded },
+                onLongClick = {
+                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    cm.setPrimaryClip(
+                        ClipData.newPlainText("guard_probe", "${result.mode} $mark ${result.detail}")
+                    )
+                    Toast.makeText(
+                        context,
+                        context.getString(R.string.guard_probe_copied),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            )
+            .padding(vertical = 1.dp)
+    ) {
+        if (expanded) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    result.mode,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Medium
+                )
+                Text(
+                    mark,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                    color = statusColor
+                )
+            }
+            // 完整 detail：不截断，可多行（点击收起）
+            Text(
+                result.detail,
+                style = MaterialTheme.typography.bodyMedium,
+                fontFamily = FontFamily.Monospace,
+                color = statusColor
+            )
+        } else {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    result.mode,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace
+                )
+                Text(
+                    "$mark ${result.detail}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                    color = statusColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                    textAlign = TextAlign.End
+                )
+            }
+        }
     }
 }
 
@@ -1162,6 +1238,13 @@ private fun GuardSettingsPage(settings: MutableState<GuardSettings>, app: Toolbo
                 )
             }
             item {
+                // 通道说明：解答"探测到底用不用特权通道"的疑虑
+                BannerTip(
+                    text = stringResource(R.string.guard_channel_tip),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                )
+            }
+            item {
                 SwitchPreference(
                     value = s.skipWhenWifiDisconnected,
                     onValueChange = {
@@ -1213,6 +1296,11 @@ private fun GuardSettingsPage(settings: MutableState<GuardSettings>, app: Toolbo
                     value = s.showPersistentNotification,
                     onValueChange = {
                         settings.value = s.copy(showPersistentNotification = it)
+                        // 服务运行中：热加载(ACTION_RELOAD)会即时重建前台通知；
+                        // 服务未运行：直接同步"未运行"常驻通知（开=显示，关=移除）
+                        if (!GuardState.running) {
+                            GuardService.syncIdleNotification(context)
+                        }
                     },
                     title = { Text(stringResource(R.string.guard_notify_persistent)) },
                     summary = { Text(stringResource(R.string.guard_notify_persistent_tip)) },
@@ -1438,7 +1526,7 @@ private fun toggleMask(current: Int, bit: Int, on: Boolean): Int =
 // ==================== 统计页 ====================
 
 @Composable
-private fun StatsPage(app: ToolboxApp?) {
+private fun StatsPage(app: ToolboxApp?, logDirUri: String) {
     val stats = app?.guardStats
     var refreshKey by remember { mutableIntStateOf(0) }
     // 打开统计页时拉一次最新数据
@@ -1486,6 +1574,22 @@ private fun StatsPage(app: ToolboxApp?) {
                     value = stats.totalRecovered.toString(),
                     modifier = Modifier.weight(1f)
                 )
+            }
+        }
+        // 全部统计清零（事件历史卡有独立的"清空事件"按钮，仅清事件）
+        item {
+            Box(
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                TextButton(
+                    onClick = { stats.reset() },
+                    contentPadding = PaddingValues(horizontal = 12.dp)
+                ) {
+                    Icon(Icons.Outlined.RestartAlt, null, Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text(stringResource(R.string.guard_stat_reset))
+                }
             }
         }
 
@@ -1545,75 +1649,202 @@ private fun StatsPage(app: ToolboxApp?) {
             }
         }
 
-        // ---- 事件历史（标题卡 + 每条事件独立 item，修复长列表布局异常） ----
+        // ---- 事件历史（单卡合并：标题 + 实时日志同款 5 按钮 + 卡内滚动列表） ----
         item {
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 4.dp)
+            EventHistoryCard(stats, logDirUri)
+        }
+    }
+}
+
+/**
+ * 事件历史卡片（与实时日志卡片同款交互，无筛选）：
+ * - 工具行：复制 / 保存 / 分享 / 管理(已保存文件列表) / 清空事件（仅事件，不清统计）
+ * - 保存文件名前缀 guard-events- 与实时日志 guard- 区分
+ * - 事件列表卡内滚动显示（全部最近 100 条，时间新→旧）
+ */
+@Composable
+private fun EventHistoryCard(stats: GuardStats, logDirUri: String) {
+    val context = LocalContext.current
+    val events = stats.events
+    var showManage by remember { mutableStateOf(false) }
+    var toastMsg by remember { mutableStateOf<String?>(null) }
+
+    fun toast(msg: String) {
+        toastMsg = msg
+    }
+
+    LaunchedEffect(toastMsg) {
+        toastMsg?.let {
+            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+            toastMsg = null
+        }
+    }
+
+    /** 单条事件的单行文本（复制/保存用） */
+    fun eventLine(e: GuardEvent): String {
+        val result = if (e.recovered) "✓ 恢复" else "✗ 未恢复"
+        return "[${GuardStats.formatTime(e.time)}] ${e.ssid.ifEmpty { "?" }} · ${e.actions} → $result · 耗时 ${e.costMs / 1000}s · 失败项: ${e.failedProbes}"
+    }
+
+    /** 全部事件文本（时间正序旧→新，与日志文件阅读习惯一致） */
+    fun eventsToText(): String {
+        if (events.isEmpty()) return ""
+        val head = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+            .format(Date())
+        return buildString {
+            appendLine(context.getString(R.string.guard_events_file_header))
+            appendLine(context.getString(R.string.guard_log_file_exported_at, head))
+            appendLine("--------")
+            events.reversed().forEach { appendLine(eventLine(it)) }
+        }
+    }
+
+    fun saveNow(): StoredLogFile? {
+        val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.getDefault()).format(Date())
+        return GuardLogStore.save(
+            context, logDirUri, "guard-events-$stamp.log", eventsToText()
+        )
+    }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp)
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            // ---- 标题 + 操作按钮行（与实时日志卡片同款） ----
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(
-                    Modifier.padding(
-                        start = 16.dp, end = 8.dp, top = 12.dp, bottom = 12.dp
-                    )
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            stringResource(R.string.guard_stat_events),
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.weight(1f)
+                Text(
+                    stringResource(R.string.guard_stat_events),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f)
+                )
+                IconButton(
+                    onClick = {
+                        if (events.isEmpty()) return@IconButton
+                        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE)
+                                as ClipboardManager
+                        cm.setPrimaryClip(
+                            ClipData.newPlainText(
+                                "guard_events",
+                                events.reversed().joinToString("\n") { eventLine(it) }
+                            )
                         )
-                        TextButton(
-                            onClick = { stats.reset() },
-                            contentPadding = PaddingValues(horizontal = 8.dp)
+                        toast(context.getString(R.string.guard_events_copied, events.size))
+                    },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        Icons.Outlined.ContentCopy,
+                        stringResource(R.string.guard_log_copy_desc),
+                        Modifier.size(17.dp)
+                    )
+                }
+                IconButton(
+                    onClick = {
+                        val saved = saveNow()
+                        toast(
+                            if (saved != null) context.getString(
+                                R.string.guard_log_saved, saved.name
+                            )
+                            else context.getString(R.string.guard_log_save_fail)
+                        )
+                    },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        Icons.Outlined.Save,
+                        stringResource(R.string.guard_log_save_desc),
+                        Modifier.size(17.dp)
+                    )
+                }
+                IconButton(
+                    onClick = {
+                        val saved = saveNow()
+                        if (saved != null) shareStoredFile(context, saved)
+                        else toast(context.getString(R.string.guard_log_save_fail))
+                    },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        Icons.Outlined.IosShare,
+                        stringResource(R.string.guard_log_export_desc),
+                        Modifier.size(17.dp)
+                    )
+                }
+                IconButton(
+                    onClick = { showManage = true },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        Icons.Outlined.FolderOpen,
+                        stringResource(R.string.guard_log_manage_desc),
+                        Modifier.size(17.dp)
+                    )
+                }
+                IconButton(
+                    onClick = {
+                        stats.clearEvents()
+                        toast(context.getString(R.string.guard_events_cleared))
+                    },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        Icons.Outlined.DeleteSweep,
+                        stringResource(R.string.guard_log_clear_desc),
+                        Modifier.size(17.dp)
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            // ---- 事件列表（卡内滚动，全部展示） ----
+            if (events.isEmpty()) {
+                Text(
+                    stringResource(R.string.guard_no_events),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 420.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    events.forEach { e ->
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp)
                         ) {
-                            Text(stringResource(R.string.guard_stat_reset))
+                            Text(
+                                "${GuardStats.formatTime(e.time)}  ${e.ssid}",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                "${e.actions} → ${if (e.recovered) "✓" else "✗"} ${e.costMs / 1000}s (${e.failedProbes})",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                                color = if (e.recovered) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.error
+                            )
                         }
                     }
-                    if (stats.events.isEmpty()) {
-                        Text(
-                            stringResource(R.string.guard_no_log),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
                 }
             }
         }
-        stats.events.take(30).forEachIndexed { index, e ->
-            item(key = "event-$index-${e.time}") {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 2.dp)
-                ) {
-                    Column(
-                        Modifier.padding(
-                            start = 16.dp, end = 16.dp, top = 8.dp, bottom = 8.dp
-                        )
-                    ) {
-                        Text(
-                            "${GuardStats.formatTime(e.time)}  ${e.ssid}",
-                            style = MaterialTheme.typography.bodySmall,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Text(
-                            "${e.actions} → ${if (e.recovered) "✓" else "✗"} ${e.costMs / 1000}s (${e.failedProbes})",
-                            style = MaterialTheme.typography.bodySmall,
-                            fontFamily = FontFamily.Monospace,
-                            color = if (e.recovered) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.error
-                        )
-                    }
-                }
-            }
-        }
+    }
+
+    if (showManage) {
+        SavedLogsDialog(context = context, logDirUri = logDirUri, onDismiss = { showManage = false })
     }
 }
 

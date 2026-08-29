@@ -127,11 +127,12 @@ data class GuardSettings(
     val logDirUri: String = LOG_DIR_URI_DEFAULT,
 
     /**
-     * 自愈执行通道：
-     * 0 = 自动（Shizuku 可用选 Shizuku，否则 Root AIDL，最后系统 API）
+     * 特权执行通道（自愈动作与 ICMP ping 探测的 shell 命令共用）：
+     * 0 = 自动（Shizuku 可用选 Shizuku，否则 Root AIDL，最后本地 sh）
      * 1 = 仅 Shizuku
      * 2 = 仅 Root AIDL
-     * 3 = 仅系统 API（targetSdk=28 免 root 老通道，兼容性好但能力有限）
+     * 3 = 仅系统 API（targetSdk=28 免 root 老通道；shell 命令降级应用内本地执行）
+     * HTTP 204 / DNS / 能力位探测走应用层 API，不使用特权通道。
      */
     val healChannel: Int = HEAL_CHANNEL_DEFAULT,
 
