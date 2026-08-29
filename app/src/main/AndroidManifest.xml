@@ -40,6 +40,12 @@
             android:enabled="true"
             android:exported="false" />
 
+        <service
+            android:name=".services.GuardService"
+            android:foregroundServiceType="specialUse"
+            android:enabled="true"
+            android:exported="false" />
+
         <provider
             android:name="rikka.shizuku.ShizukuProvider"
             android:authorities="${shizukuAuthority}"

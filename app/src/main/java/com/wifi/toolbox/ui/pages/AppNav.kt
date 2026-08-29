@@ -64,6 +64,7 @@ import com.wifi.toolbox.BuildConfig
 import com.wifi.toolbox.R
 import com.wifi.toolbox.ui.items.TagItem
 import com.wifi.toolbox.ui.screen.AboutScreen
+import com.wifi.toolbox.ui.screen.GuardScreen
 import com.wifi.toolbox.ui.screen.HomeScreen
 import com.wifi.toolbox.ui.screen.ManageScreen
 import com.wifi.toolbox.ui.screen.PojieScreen
@@ -165,6 +166,7 @@ fun AppNav(pendingNavigation: MutableState<String?>) {
                 composable("Home") { HomeScreen { scope.launch { drawerState.open() } } }
                 composable("Settings") { SettingsScreen { scope.launch { drawerState.open() } } }
                 composable("Pojie") { PojieScreen { scope.launch { drawerState.open() } } }
+                composable("Guard") { GuardScreen { scope.launch { drawerState.open() } } }
                 composable("Viewer") { ManageScreen { scope.launch { drawerState.open() } } }
                 composable("Test") { TestScreen(onMenuClick = { scope.launch { drawerState.open() } }) }
                 composable("About") { AboutScreen { scope.launch { drawerState.open() } } }
@@ -318,6 +320,10 @@ fun NavContent(
                     NavMenuItem(
                         context.getString(R.string.wifi_pojie_name),
                         "Pojie", Icons.Rounded.VpnKey
+                    ),
+                    NavMenuItem(
+                        context.getString(R.string.guard_name),
+                        "Guard", Icons.Rounded.MonitorHeart
                     ),
                     NavMenuItem(
                         context.getString(R.string.wifi_manager),

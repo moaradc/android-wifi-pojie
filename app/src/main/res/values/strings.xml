@@ -120,6 +120,110 @@
     <string name="home">主页</string>
     <string name="toolbox">工具箱</string>
     <string name="lab">实验室</string>
+
+    <!-- ==================== 网络守护 ==================== -->
+    <string name="guard_name">网络守护</string>
+    <string name="guard_tab_status">状态</string>
+    <string name="guard_tab_stats">统计</string>
+    <string name="guard_service_running">守护运行中</string>
+    <string name="guard_service_stopped">守护已停止</string>
+    <string name="guard_interval_now">检测间隔 %1$ds · 前后台常驻</string>
+    <string name="guard_check_now">立即检测</string>
+    <string name="guard_live_log">实时日志</string>
+    <string name="guard_no_log">暂无日志</string>
+    <string name="guard_last_check">上次检测: %1$s 前</string>
+    <string name="guard_state_online">网络正常</string>
+    <string name="guard_state_suspect">疑似断网（防抖中）</string>
+    <string name="guard_state_healing">正在自愈重连…</string>
+    <string name="guard_state_heal_failed">自愈失败（退避冷却中）</string>
+    <string name="guard_state_portal">需要认证（Captive Portal）</string>
+    <string name="guard_state_link_down">WiFi 已断开（跳过）</string>
+    <string name="guard_state_idle">未开始</string>
+    <string name="guard_notif_monitoring">正在守护 WiFi 连通性</string>
+    <string name="guard_notif_event_channel">守护事件通知</string>
+    <string name="guard_notif_healed_title">已自动重连 %1$s</string>
+    <string name="guard_notif_healed_text">网络已恢复，耗时 %1$ds</string>
+    <string name="guard_notif_heal_fail_title">重连未成功</string>
+    <string name="guard_notif_heal_fail_text">%1$s 重连后仍无法上网，将按退避策略继续尝试</string>
+
+    <string name="guard_cat_probe">检测方式</string>
+    <string name="guard_probe_tip">已连接不等于能上网。可组合多种探测方式，任一通过即判在线；建议至少启用HTTP 204。ICMP探测需要Shizuku或Root通道。</string>
+    <string name="guard_probe_http">HTTP 204 探测</string>
+    <string name="guard_probe_http_tip">AOSP 标准探测（绑定WiFi网络防误判），双端点互备，最推荐</string>
+    <string name="guard_probe_dns">DNS 解析探测</string>
+    <string name="guard_probe_dns_tip">检测DNS劫持/黑洞：204通但域名解析失败时有效</string>
+    <string name="guard_probe_icmp">ICMP ping 探测</string>
+    <string name="guard_probe_icmp_tip">特权shell执行 ping -I wlan0，绑定wlan0接口探测固定IP，需Shizuku/Root</string>
+    <string name="guard_probe_validated">系统能力位（VALIDATED）</string>
+    <string name="guard_probe_validated_tip">读取系统最近一次网络验证结论，零开销但非实时</string>
+    <string name="guard_probe_timeout">单次探测超时</string>
+    <string name="guard_ms_value">%1$dms</string>
+    <string name="guard_fail_threshold">防抖阈值</string>
+    <string name="guard_fail_threshold_tip">连续失败 %1$d 次才判定断网，避免网络抖动误触发重连</string>
+
+    <string name="guard_cat_timing">检测时机</string>
+    <string name="guard_interval">检测间隔（预设）</string>
+    <string name="guard_interval_value">%1$d 秒</string>
+    <string name="guard_interval_custom_value">自定义 %1$d 秒</string>
+    <string name="guard_interval_custom">自定义间隔…</string>
+    <string name="guard_interval_custom_tip">输入 5-3600 秒之间的自定义检测间隔</string>
+    <string name="guard_interval_custom_input">秒数（5-3600）</string>
+    <string name="guard_interval_custom_range">范围 5~3600 秒，过短会增加耗电</string>
+    <string name="guard_check_on_change">网络变化立即检测</string>
+    <string name="guard_check_on_change_tip">WiFi重连/切换时立即触发一次检测，免等待定时</string>
+    <string name="guard_only_wifi">仅在 WiFi 连接时守护</string>
+    <string name="guard_only_wifi_tip">未连接WiFi时不探测不统计（用流量时不打扰）</string>
+
+    <string name="guard_cat_heal">自动重连</string>
+    <string name="guard_heal_strategy">自愈策略档位</string>
+    <string name="guard_strategy_0">仅检测不重连</string>
+    <string name="guard_strategy_1">轻量档：重协商（最快）</string>
+    <string name="guard_strategy_2">标准档：断开重连（推荐）</string>
+    <string name="guard_strategy_3">强力档：逐级升压</string>
+    <string name="guard_strategy_4">终极档：升压+定向重连</string>
+    <string name="guard_strategy_tip">不同设备故障不同：假连接选标准档；省电休眠类故障选强力档。升压策略每步探测恢复即停，不浪费重动作。</string>
+    <string name="guard_heal_verify_timeout">重连后验证超时</string>
+    <string name="guard_sec_value">%1$ds</string>
+    <string name="guard_cooldown_base">退避基数</string>
+    <string name="guard_cooldown_base_tip">连续自愈失败后按 %1$ds 基数翻倍等待，防止路由器断电时空转</string>
+    <string name="guard_heal_channel">自愈执行通道</string>
+    <string name="guard_channel_auto">自动（Shizuku→Root→API）</string>
+    <string name="guard_channel_aidl">Root AIDL</string>
+    <string name="guard_channel_api">系统 API（免Root）</string>
+    <string name="guard_skip_link_down">WiFi断开时不自愈</string>
+    <string name="guard_skip_link_down_tip">链路层已断开可能是用户主动断开或路由器关机，跳过重连</string>
+    <string name="guard_skip_portal">认证页面时跳过自愈</string>
+    <string name="guard_skip_portal_tip">检测到Captive Portal（公共WiFi认证页）时重连无意义，跳过</string>
+
+    <string name="guard_cat_notify">通知</string>
+    <string name="guard_notify_heal">重连成功通知</string>
+    <string name="guard_notify_heal_tip">自动重连恢复后发系统通知</string>
+    <string name="guard_notify_fail">重连失败通知</string>
+    <string name="guard_notify_fail_tip">重连后仍不通时发系统通知</string>
+    <string name="guard_notify_persistent">常驻守护通知</string>
+    <string name="guard_notify_persistent_tip">前台服务的低优先级常驻通知（关闭后系统可能更早回收服务）</string>
+
+    <string name="guard_stat_checks">总检测</string>
+    <string name="guard_stat_failures">断网判定</string>
+    <string name="guard_stat_heals">重连次数</string>
+    <string name="guard_stat_recovered">恢复成功</string>
+    <string name="guard_stat_action_rate">自愈动作有效率</string>
+    <string name="guard_stat_action_tip">哪个动作成功率高就说明你的设备是什么故障：重协商有效=链路假死；总开关有效=驱动/省电休眠</string>
+    <string name="guard_stat_events">事件历史</string>
+    <string name="guard_stat_reset">清零</string>
+
+    <string name="guard_log_started">守护启动，每 %1$ds 检测一次</string>
+    <string name="guard_log_check_error">检测异常</string>
+    <string name="guard_log_online">在线 ✓ %1$s</string>
+    <string name="guard_log_offline_count">离线判定 %1$d/%2$d（%3$s）</string>
+    <string name="guard_log_wifi_not_connected">WiFi 未连接，跳过本轮</string>
+    <string name="guard_log_wifi_link_down">WiFi 链路已断开，跳过自愈</string>
+    <string name="guard_log_portal">检测到认证页面（Portal），跳过自愈</string>
+    <string name="guard_log_backoff">连续失败，退避等待 %1$ds 后再试</string>
+    <string name="guard_log_healing">开始自愈: %1$s</string>
+    <string name="guard_log_heal_ok">自愈成功，耗时 %1$ds</string>
+    <string name="guard_log_heal_fail">自愈后仍不通（连续失败 %1$d 次）</string>
+
     <string name="options">选项</string>
     <string name="about">关于</string>
     <string name="tip_string">Tip: %1$s</string>
