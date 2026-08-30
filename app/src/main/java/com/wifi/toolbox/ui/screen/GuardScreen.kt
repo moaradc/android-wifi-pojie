@@ -299,7 +299,11 @@ private fun StatusPage(settings: GuardSettings, app: ToolboxApp?) {
     }
 }
 
-/** 状态视觉三元组：本地化标签 + 语义色 + 图标（Apple 系统状态页式大图标） */
+/**
+ * 状态视觉三元组：本地化标签 + 语义色 + 图标（Apple 系统状态页式大图标）。
+ * 全部取自 MaterialTheme.colorScheme（在线 primary / 疑似·自愈 tertiary /
+ * 失败·认证 error / 未运行·链路断开 secondary），跟随总设置的动态主题色/颜色种子。
+ */
 private data class StateVisual(val label: String, val color: Color, val icon: ImageVector)
 
 @Composable
@@ -327,11 +331,11 @@ private fun stateVisual(state: String): StateVisual {
         )
         GuardState.STATE_LINK_DOWN -> StateVisual(
             stringResource(R.string.guard_state_link_down),
-            MaterialTheme.colorScheme.onSurfaceVariant, Icons.Filled.WifiOff
+            MaterialTheme.colorScheme.secondary, Icons.Filled.WifiOff
         )
         else -> StateVisual(
             stringResource(R.string.guard_state_idle),
-            MaterialTheme.colorScheme.onSurfaceVariant, Icons.Filled.MonitorHeart
+            MaterialTheme.colorScheme.secondary, Icons.Filled.MonitorHeart
         )
     }
 }
@@ -1514,6 +1518,31 @@ private fun GuardSettingsPage(settings: MutableState<GuardSettings>, app: Toolbo
                     type = ListPreferenceType.DROPDOWN_MENU
                 )
             }
+            item {
+                // 自动保存日志：守护运行时新日志自动追加到「日志保存位置」
+                // （每天一个 guard-auto-日期.log 文件，自动保留最近 30 个；
+                //   由 GuardService 每轮检测后落盘，服务停止时最终落盘一次）
+                SwitchPreference(
+                    value = s.autoSaveLog,
+                    onValueChange = {
+                        settings.value = s.copy(autoSaveLog = it)
+                        // 服务运行中：热加载即时生效（下轮检测即开始追加）
+                        if (GuardState.running) {
+                            try {
+                                context.startService(
+                                    Intent(context, GuardService::class.java).apply {
+                                        action = GuardService.ACTION_RELOAD
+                                    }
+                                )
+                            } catch (_: Exception) {
+                            }
+                        }
+                    },
+                    title = { Text(stringResource(R.string.guard_auto_save)) },
+                    summary = { Text(stringResource(R.string.guard_auto_save_tip)) },
+                    icon = { Icon(Icons.Filled.SaveAlt, null) }
+                )
+            }
         }
     }
 
@@ -1744,8 +1773,18 @@ private fun customActionTip(actionId: String): String = stringResource(
  *   服务，有 Magisk/KernelSU 授权即可）；
  * - 恢复默认按钮撤销保活命令（白名单移除 + appops 重置 default），
  *   自动选通道：Shizuku 可用走 Shizuku，否则 su；
- * 结果语义化显示：全部生效 ✓；部分生效时才列技术项（Doze/RUN_ANY/RUN/FGS）便于排障。
+ * - 结果只显示最近一次操作的单条反馈（原 Shizuku/Root/恢复默认三行会叠加），
+ *   「恢复默认」结果文案自说明（如「✓ 已恢复默认」），不加「恢复默认：」前缀；
+ *   全部生效 ✓；部分生效时才列技术项（Doze/RUN_ANY/RUN/FGS）便于排障。
  */
+
+/** 最近一次保活操作的结果（channel=null 表示「恢复默认」，文案自说明无需前缀） */
+private data class KeepAliveOutcome(
+    val channel: String?,
+    val isRevert: Boolean,
+    val result: KeepAliveHelper.KeepAliveResult
+)
+
 @Composable
 private fun KeepAliveRow() {
     val context = LocalContext.current
@@ -1754,9 +1793,7 @@ private fun KeepAliveRow() {
     var shizukuRunning by remember { mutableStateOf(false) }
     var rootRunning by remember { mutableStateOf(false) }
     var revertRunning by remember { mutableStateOf(false) }
-    var shizukuResult by remember { mutableStateOf<KeepAliveHelper.KeepAliveResult?>(null) }
-    var rootResult by remember { mutableStateOf<KeepAliveHelper.KeepAliveResult?>(null) }
-    var revertResult by remember { mutableStateOf<KeepAliveHelper.KeepAliveResult?>(null) }
+    var outcome by remember { mutableStateOf<KeepAliveOutcome?>(null) }
     var toastMsg by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(toastMsg) {
@@ -1793,7 +1830,7 @@ private fun KeepAliveRow() {
                             val r = withContext(kotlinx.coroutines.Dispatchers.IO) {
                                 KeepAliveHelper.applyViaShizuku(pkg)
                             }
-                            shizukuResult = r
+                            outcome = KeepAliveOutcome("Shizuku", false, r)
                             shizukuRunning = false
                         }
                     } else {
@@ -1820,7 +1857,7 @@ private fun KeepAliveRow() {
                         val r = withContext(kotlinx.coroutines.Dispatchers.IO) {
                             KeepAliveHelper.applyViaSu(pkg)
                         }
-                        rootResult = r
+                        outcome = KeepAliveOutcome("Root", false, r)
                         rootRunning = false
                         // su 授权失败（无 Magisk/KernelSU 或已拒绝）：脚本未真正执行
                         // （首段标记 ---DOZE--- 未出现在输出中）
@@ -1847,7 +1884,7 @@ private fun KeepAliveRow() {
                         if (viaShizuku) KeepAliveHelper.revertViaShizuku(pkg)
                         else KeepAliveHelper.revertViaSu(pkg)
                     }
-                    revertResult = r
+                    outcome = KeepAliveOutcome(null, true, r)
                     revertRunning = false
                     if (!viaShizuku && !r.raw.contains("---DOZE---")) {
                         toastMsg = context.getString(R.string.guard_keepalive_su_failed)
@@ -1866,33 +1903,20 @@ private fun KeepAliveRow() {
         val partial = stringResource(R.string.guard_keepalive_partial)
         val failedItems = stringResource(R.string.guard_keepalive_failed_items)
         val revertDone = stringResource(R.string.guard_keepalive_revert_done)
+        val revertPartial = stringResource(R.string.guard_keepalive_revert_partial)
         val revertFailed = stringResource(R.string.guard_keepalive_revert_failed)
-        shizukuResult?.let {
+        // 单条结果行：只显示最近一次操作（Shizuku/Root 带通道前缀；恢复默认文案自说明）
+        outcome?.let { o ->
+            val text = if (o.isRevert)
+                resultText(o.result, revertDone, revertPartial, revertFailed)
+            else
+                resultText(o.result, allOk, partial, failedItems)
             Text(
-                "Shizuku: " + resultText(it, allOk, partial, failedItems),
+                if (o.channel != null) "${o.channel}: $text" else text,
                 style = MaterialTheme.typography.bodySmall,
-                color = if (it.all) MaterialTheme.colorScheme.primary
+                color = if (o.result.all) MaterialTheme.colorScheme.primary
                 else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 4.dp)
-            )
-        }
-        rootResult?.let {
-            Text(
-                "Root: " + resultText(it, allOk, partial, failedItems),
-                style = MaterialTheme.typography.bodySmall,
-                color = if (it.all) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 2.dp)
-            )
-        }
-        revertResult?.let {
-            Text(
-                stringResource(R.string.guard_keepalive_revert) + ": " +
-                        resultText(it, revertDone, partial, revertFailed),
-                style = MaterialTheme.typography.bodySmall,
-                color = if (it.all) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 2.dp)
             )
         }
     }
@@ -1985,8 +2009,7 @@ private fun StatsPage(app: ToolboxApp?, logDirUri: String) {
                 )
             }
         }
-        // 全部统计清零（移至页底，远离大数字瓦片误触区；
-        // 事件历史卡的"清空事件"按钮仅清事件，与此处的全部清零区分）
+        // 全部统计清零按钮在事件历史卡片工具行内（与「清空事件」相邻，带二次确认）
 
         // ---- 动作有效率卡（标题行含总成功率） ----
         if (stats.actionStats.isNotEmpty()) {
@@ -1995,47 +2018,9 @@ private fun StatsPage(app: ToolboxApp?, logDirUri: String) {
             }
         }
 
-        // ---- 事件历史（单卡合并：标题 + 实时日志同款 5 按钮 + 卡内滚动列表） ----
+        // ---- 事件历史（单卡合并：标题 + 实时日志同款工具行 + 卡内滚动列表） ----
         item {
             EventHistoryCard(stats, logDirUri)
-        }
-
-        // ---- 全部统计清零（页底，带二次确认） ----
-        item {
-            var showResetConfirm by remember { mutableStateOf(false) }
-            Box(
-                modifier = Modifier.fillMaxWidth(),
-                contentAlignment = Alignment.Center
-            ) {
-                TextButton(
-                    onClick = { showResetConfirm = true },
-                    contentPadding = PaddingValues(horizontal = 12.dp)
-                ) {
-                    Icon(Icons.Outlined.RestartAlt, null, Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text(stringResource(R.string.guard_stat_reset))
-                }
-            }
-            if (showResetConfirm) {
-                AlertDialog(
-                    onDismissRequest = { showResetConfirm = false },
-                    title = { Text(stringResource(R.string.guard_stat_reset)) },
-                    text = { Text(stringResource(R.string.guard_stat_reset_confirm)) },
-                    confirmButton = {
-                        TextButton(onClick = {
-                            stats.reset()
-                            showResetConfirm = false
-                        }) {
-                            Text(stringResource(R.string.guard_stat_reset))
-                        }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { showResetConfirm = false }) {
-                            Text(stringResource(android.R.string.cancel))
-                        }
-                    }
-                )
-            }
         }
     }
 }
@@ -2173,7 +2158,8 @@ private fun ActionRateCard(stats: GuardStats) {
 
 /**
  * 事件历史卡片（与实时日志卡片同款交互，无筛选）：
- * - 工具行：复制 / 保存 / 分享 / 管理(已保存文件列表) / 清空事件（仅事件，不清统计）
+ * - 工具行：复制 / 保存 / 分享 / 管理(已保存文件列表) / 清空事件（仅事件，不清统计） /
+ *   清零（全部统计+事件，带二次确认）
  * - 保存文件名前缀 guard-events- 与实时日志 guard- 区分
  * - 事件列表卡内滚动显示（全部最近 100 条，时间新→旧）
  */
@@ -2182,6 +2168,7 @@ private fun EventHistoryCard(stats: GuardStats, logDirUri: String) {
     val context = LocalContext.current
     val events = stats.events
     var showManage by remember { mutableStateOf(false) }
+    var showResetConfirm by remember { mutableStateOf(false) }
     var toastMsg by remember { mutableStateOf<String?>(null) }
 
     fun toast(msg: String) {
@@ -2318,6 +2305,17 @@ private fun EventHistoryCard(stats: GuardStats, logDirUri: String) {
                         Modifier.size(17.dp)
                     )
                 }
+                // 全部统计清零（统计+事件，与「清空事件」区分；带二次确认）
+                IconButton(
+                    onClick = { showResetConfirm = true },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        Icons.Outlined.RestartAlt,
+                        stringResource(R.string.guard_stat_reset_desc),
+                        Modifier.size(17.dp)
+                    )
+                }
             }
 
             Spacer(Modifier.height(8.dp))
@@ -2384,5 +2382,27 @@ private fun EventHistoryCard(stats: GuardStats, logDirUri: String) {
 
     if (showManage) {
         SavedLogsDialog(context = context, logDirUri = logDirUri, onDismiss = { showManage = false })
+    }
+
+    // 全部统计清零二次确认（清空后不可恢复）
+    if (showResetConfirm) {
+        AlertDialog(
+            onDismissRequest = { showResetConfirm = false },
+            title = { Text(stringResource(R.string.guard_stat_reset)) },
+            text = { Text(stringResource(R.string.guard_stat_reset_confirm)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    stats.reset()
+                    showResetConfirm = false
+                }) {
+                    Text(stringResource(R.string.guard_stat_reset))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showResetConfirm = false }) {
+                    Text(stringResource(android.R.string.cancel))
+                }
+            }
+        )
     }
 }

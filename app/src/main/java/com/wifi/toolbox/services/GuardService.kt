@@ -22,6 +22,7 @@ import com.wifi.toolbox.R
 import com.wifi.toolbox.ToolboxApp
 import com.wifi.toolbox.structs.GuardSettings
 import com.wifi.toolbox.utils.ApiUtil
+import com.wifi.toolbox.utils.GuardLogStore
 import com.wifi.toolbox.utils.GuardStats
 import com.wifi.toolbox.utils.NetProber
 import com.wifi.toolbox.utils.ShizukuUtil
@@ -78,6 +79,7 @@ class GuardService : Service() {
     private var lastEventLog = ""            // 最近一次事件触发的 action（去重）
     private var breakerNotified = false      // 熔断提示已发（防重复日志/通知）
     private var wakeLock: PowerManager.WakeLock? = null  // 后台保活：息屏 CPU 唤醒锁
+    private var autoSaveDay = ""                      // 自动保存：当天日期戳（跨天触发旧文件清理）
 
     override fun onCreate() {
         super.onCreate()
@@ -179,6 +181,8 @@ class GuardService : Service() {
             if (settings.autoCleanDays > 0) {
                 GuardState.pruneLogs(settings.autoCleanDays)
             }
+            // 自动保存日志：将本轮新增日志追加到当天滚动文件（设置关闭时无动作）
+            autoSaveFlush()
             val interval = settings.checkIntervalSec * 1000L
             // 分片睡眠：设置改小后能尽快生效，同时熄屏下不额外唤醒
             var slept = 0L
@@ -526,10 +530,57 @@ class GuardService : Service() {
         GuardState.addLog(msg, level)
     }
 
+    // ==================== 自动保存日志 ====================
+
+    /**
+     * 将实时日志缓冲中未保存的条目追加到自动保存文件（guard-auto-yyyyMMdd.log，
+     * 每天一个）。游标 GuardState.autoSaveCursor 记录已落盘条数：
+     * - 新增日志仅在游标之后，追加后游标前移；
+     * - 中途开启开关会自动补写缓冲内全部历史（最多 200 条）；
+     * - 追加失败（如目录失效且私有目录写入失败）时游标不动，下轮重试。
+     * 触发点：每轮检测后 + onDestroy 最终落盘。跨天时先清理旧自动文件。
+     */
+    private fun autoSaveFlush() {
+        if (!settings.autoSaveLog) return
+        val logs = GuardState.logList()
+        val cursor = GuardState.autoSaveCursor
+        if (logs.size <= cursor) return
+        val day = SimpleDateFormat("yyyyMMdd", Locale.getDefault()).format(Date())
+        if (day != autoSaveDay) {
+            autoSaveDay = day
+            pruneAutoFiles()
+        }
+        val sb = StringBuilder()
+        for (i in cursor until logs.size) {
+            sb.append('[').append(GuardLog.formatTime(logs[i].time)).append("] ")
+                .append(logs[i].msg).append('\n')
+        }
+        if (GuardLogStore.append(this, settings.logDirUri, "guard-auto-$day.log", sb.toString())) {
+            GuardState.autoSaveCursor = logs.size
+        }
+    }
+
+    /** 自动保存文件只保留最近 [AUTO_SAVE_KEEP] 个（跨天时触发，两位置一并统计） */
+    private fun pruneAutoFiles() {
+        try {
+            val files = GuardLogStore.list(this, settings.logDirUri)
+                .filter { it.name.startsWith("guard-auto-") }
+            if (files.size > AUTO_SAVE_KEEP) {
+                files.drop(AUTO_SAVE_KEEP).forEach { GuardLogStore.delete(this, it) }
+            }
+        } catch (_: Exception) {
+        }
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         loopJob?.cancel()
         scope.cancel()
+        // 最终落盘：开启自动保存时把残留未保存日志写入文件（服务被停止的场景）
+        try {
+            autoSaveFlush()
+        } catch (_: Exception) {
+        }
         try {
             wakeLock?.takeIf { it.isHeld }?.release()
         } catch (_: Exception) {
@@ -559,6 +610,9 @@ class GuardService : Service() {
         const val ACTION_STOP = "com.wifi.toolbox.guard.STOP"
         const val ACTION_RUN_CHECK = "com.wifi.toolbox.guard.CHECK"
         const val ACTION_RELOAD = "com.wifi.toolbox.guard.RELOAD"
+
+        /** 自动保存日志滚动文件保留个数（guard-auto-*.log，跨天时清理） */
+        const val AUTO_SAVE_KEEP = 30
 
         private fun createChannelStatic(context: Context) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -714,12 +768,27 @@ object GuardState {
 
     private val logs = androidx.compose.runtime.mutableStateListOf<GuardLogEntry>()
 
+    /**
+     * 自动保存游标：实时日志缓冲中前 N 条已写入自动保存文件
+     * （由 GuardService 维护；缓冲头部淘汰/清理/清空时同步前移或归零，
+     *  保证追加写入不重复、不遗漏）
+     */
+    var autoSaveCursor by androidx.compose.runtime.mutableIntStateOf(0)
+
     fun addLog(msg: String, level: Int = GuardLog.LEVEL_INFO) {
-        if (logs.size >= 200) logs.removeAt(0)
+        if (logs.size >= 200) {
+            logs.removeAt(0)
+            // 被淘汰的是已保存条目则游标前移；未保存条目被丢弃
+            // （每轮检测新增远小于 200，正常不会发生）
+            if (autoSaveCursor > 0) autoSaveCursor--
+        }
         logs.add(GuardLogEntry(System.currentTimeMillis(), level, msg))
     }
 
-    fun clearLogs() = logs.clear()
+    fun clearLogs() {
+        logs.clear()
+        autoSaveCursor = 0
+    }
 
     fun logList(): List<GuardLogEntry> = logs
 
@@ -734,6 +803,9 @@ object GuardState {
         val cutoff = System.currentTimeMillis() - keepDays * 86_400_000L
         val before = logs.size
         logs.removeAll { it.time < cutoff }
-        return before - logs.size
+        val removed = before - logs.size
+        // 已删除条目游标同步前移，避免自动保存重复追加幸存条目
+        if (removed > 0) autoSaveCursor = (autoSaveCursor - removed).coerceAtLeast(0)
+        return removed
     }
 }

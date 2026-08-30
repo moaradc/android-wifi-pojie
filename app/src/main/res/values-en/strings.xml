@@ -126,7 +126,7 @@
     <string name="guard_notif_action_exit">Exit</string>
     <string name="guard_cat_keepalive">Background keep-alive</string>
     <string name="guard_keepalive_wakelock">Keep checking with screen off (wake lock)</string>
-    <string name="guard_keepalive_wakelock_tip">Holds a CPU wake lock so checks continue with screen off (slight battery cost)</string>
+    <string name="guard_keepalive_wakelock_tip">Keeps the process running in the background (some systems may still kill it)</string>
     <string name="guard_keepalive_battery">Battery optimization exemption</string>
     <string name="guard_keepalive_battery_on">Exempted ✓ (system dialog to change)</string>
     <string name="guard_keepalive_battery_off">Not exempted — tap to request (doze freezes background)</string>
@@ -207,7 +207,7 @@
     <string name="guard_notify_fail">Notify on failure</string>
     <string name="guard_notify_fail_tip">System notification when still offline after reconnect</string>
     <string name="guard_notify_persistent">Persistent guard notification</string>
-    <string name="guard_notify_persistent_tip">Always keeps the notification ("Not running" with quick start when stopped); off = only while running</string>
+    <string name="guard_notify_persistent_tip">When on, the notification is always present</string>
     <string name="guard_stat_checks">Total checks</string>
     <string name="guard_stat_failures">Offline verdicts</string>
     <string name="guard_stat_heals">Reconnects</string>
@@ -217,6 +217,7 @@
     <string name="guard_stat_events">Event history</string>
     <string name="guard_stat_reset">Reset</string>
     <string name="guard_stat_reset_confirm">All statistics and event history will be cleared and cannot be undone. Continue?</string>
+    <string name="guard_stat_reset_desc">Reset all stats and events</string>
     <string name="guard_log_started">Guard started, checking every %1$ds</string>
     <string name="guard_log_check_error">Check error</string>
     <string name="guard_log_online">Online ✓ %1$s</string>
@@ -271,6 +272,7 @@
     <string name="guard_keepalive_revert">Revert to defaults</string>
     <string name="guard_keepalive_all_ok">✓ All applied</string>
     <string name="guard_keepalive_partial">%1$d/4 applied</string>
+    <string name="guard_keepalive_revert_partial">%1$d/4 reverted</string>
     <string name="guard_keepalive_failed_items">not applied: %1$s</string>
     <string name="guard_keepalive_revert_done">✓ Reverted to defaults</string>
     <string name="guard_keepalive_revert_failed">not reverted: %1$s</string>
@@ -302,6 +304,8 @@
     <string name="guard_auto_clean">Auto clean</string>
     <string name="guard_auto_clean_off">Off</string>
     <string name="guard_auto_clean_value">Keep for %1$d days</string>
+    <string name="guard_auto_save">Auto-save logs</string>
+    <string name="guard_auto_save_tip">While guarding, new log lines are appended automatically to the save location (one file per day, newest 30 kept)</string>
     <string name="guard_log_src_app">App dir</string>
     <string name="guard_log_src_saf">Custom dir</string>
     <string name="guard_channel_current_title">Current channels (tap to collapse)</string>

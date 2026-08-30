@@ -140,6 +140,13 @@ data class GuardSettings(
     val autoCleanDays: Int = AUTO_CLEAN_DAYS_DEFAULT,
 
     /**
+     * 自动保存日志：守护运行时新日志自动追加到「日志保存位置」（每天一个
+     * guard-auto-yyyyMMdd.log 滚动文件，自动保留最近 30 个；每轮检测后落盘，
+     * 服务停止时最终落盘一次）。
+     */
+    val autoSaveLog: Boolean = AUTO_SAVE_LOG_DEFAULT,
+
+    /**
      * 特权执行通道（自愈动作与 ICMP ping 探测的 shell 命令共用）：
      * 0 = 自动（Shizuku 可用选 Shizuku，否则 Root AIDL，最后本地 sh）
      * 1 = 仅 Shizuku
@@ -182,6 +189,7 @@ data class GuardSettings(
         const val LOG_LEVELS_KEY = "guard_log_levels"
         const val LOG_DIR_URI_KEY = "guard_log_dir_uri"
         const val AUTO_CLEAN_DAYS_KEY = "guard_auto_clean_days"
+        const val AUTO_SAVE_LOG_KEY = "guard_auto_save_log"
         const val HEAL_CHANNEL_KEY = "guard_heal_channel"
         const val START_ON_BOOT_KEY = "guard_start_on_boot"
 
@@ -212,6 +220,8 @@ data class GuardSettings(
         const val LOG_DIR_URI_DEFAULT = ""
         /** 默认关闭自动清理（保持旧行为） */
         const val AUTO_CLEAN_DAYS_DEFAULT = 0
+        /** 默认关闭自动保存（与手动保存行为区分，避免意外产生文件） */
+        const val AUTO_SAVE_LOG_DEFAULT = false
 
         /** 自动清理保留天数预设（0 = 关闭） */
         val AUTO_CLEAN_PRESETS = listOf(0, 1, 3, 7, 30)
@@ -296,6 +306,9 @@ data class GuardSettings(
                 autoCleanDays = prefs.getInt(
                     AUTO_CLEAN_DAYS_KEY, AUTO_CLEAN_DAYS_DEFAULT
                 ).coerceIn(0, 365),
+                autoSaveLog = prefs.getBoolean(
+                    AUTO_SAVE_LOG_KEY, AUTO_SAVE_LOG_DEFAULT
+                ),
                 healChannel = prefs.getInt(HEAL_CHANNEL_KEY, HEAL_CHANNEL_DEFAULT),
                 startOnBoot = prefs.getBoolean(START_ON_BOOT_KEY, START_ON_BOOT_DEFAULT)
             )

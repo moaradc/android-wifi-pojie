@@ -87,6 +87,61 @@ object GuardLogStore {
         }
     }
 
+    /**
+     * 追加写入（自动保存日志用；文件不存在则创建）。
+     * - SAF：优先 openOutputStream(uri, "wa") 追加模式；个别 provider 不支持时
+     *   回退「读已有内容 + 整体重写」；SAF 不可写时回退私有目录
+     * - 私有目录：File.appendText
+     * @return 是否成功
+     */
+    fun append(context: Context, uriStr: String, fileName: String, content: String): Boolean {
+        if (content.isEmpty()) return false
+        val saf = safDir(context, uriStr)
+        if (saf != null) {
+            try {
+                var doc = saf.findFile(fileName)
+                if (doc == null) doc = saf.createFile("text/plain", fileName)
+                if (doc != null) {
+                    try {
+                        val os = context.contentResolver.openOutputStream(doc.uri, "wa")
+                        if (os != null) {
+                            os.use {
+                                it.write(content.toByteArray(Charsets.UTF_8))
+                                it.flush()
+                            }
+                            return true
+                        }
+                    } catch (_: Exception) {
+                        // 追加模式不受支持：读出已有内容 + 整体重写
+                        val existing = try {
+                            context.contentResolver.openInputStream(doc.uri)?.use {
+                                it.readBytes().toString(Charsets.UTF_8)
+                            } ?: ""
+                        } catch (_: Exception) {
+                            ""
+                        }
+                        val os = context.contentResolver.openOutputStream(doc.uri, "wt")
+                        if (os != null) {
+                            os.use {
+                                it.write((existing + content).toByteArray(Charsets.UTF_8))
+                                it.flush()
+                            }
+                            return true
+                        }
+                    }
+                }
+            } catch (_: Exception) {
+                // SAF 写入失败 → 回退私有目录
+            }
+        }
+        return try {
+            File(privateDir(context), fileName).appendText(content)
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     /** 列出两个位置的全部日志（时间倒序；含已失效 SAF 之外的私有目录文件） */
     fun list(context: Context, uriStr: String): List<StoredLogFile> {
         val out = mutableListOf<StoredLogFile>()

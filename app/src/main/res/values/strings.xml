@@ -128,7 +128,7 @@
     <string name="guard_notif_action_exit">结束</string>
     <string name="guard_cat_keepalive">后台保活</string>
     <string name="guard_keepalive_wakelock">息屏保持检测（唤醒锁）</string>
-    <string name="guard_keepalive_wakelock_tip">持有 CPU 唤醒锁，息屏后检测照常运行（略增耗电，可关）</string>
+    <string name="guard_keepalive_wakelock_tip">保持进程在后台运行。（部分系统可能导致杀后台）</string>
     <string name="guard_keepalive_battery">电池优化白名单</string>
     <string name="guard_keepalive_battery_on">已豁免 ✓（系统弹窗可修改）</string>
     <string name="guard_keepalive_battery_off">未豁免——点击申请（息屏省电会冻结后台）</string>
@@ -213,7 +213,7 @@
     <string name="guard_notify_fail">重连失败通知</string>
     <string name="guard_notify_fail_tip">重连后仍不通时发系统通知</string>
     <string name="guard_notify_persistent">常驻守护通知</string>
-    <string name="guard_notify_persistent_tip">开启后始终常驻通知（停止时显示“未运行”可快捷开启）；关闭则仅运行中显示</string>
+    <string name="guard_notify_persistent_tip">开启后始终常驻通知</string>
 
     <string name="guard_stat_checks">总检测</string>
     <string name="guard_stat_failures">断网判定</string>
@@ -224,6 +224,7 @@
     <string name="guard_stat_events">事件历史</string>
     <string name="guard_stat_reset">清零</string>
     <string name="guard_stat_reset_confirm">全部统计数据与事件历史将清零，且无法恢复。确定继续？</string>
+    <string name="guard_stat_reset_desc">清零全部统计与事件</string>
 
     <string name="guard_log_started">守护启动，每 %1$ds 检测一次</string>
     <string name="guard_log_check_error">检测异常</string>
@@ -279,6 +280,7 @@
     <string name="guard_keepalive_revert">恢复默认</string>
     <string name="guard_keepalive_all_ok">✓ 全部生效</string>
     <string name="guard_keepalive_partial">生效 %1$d/4</string>
+    <string name="guard_keepalive_revert_partial">已恢复 %1$d/4</string>
     <string name="guard_keepalive_failed_items">未生效：%1$s</string>
     <string name="guard_keepalive_revert_done">✓ 已恢复默认</string>
     <string name="guard_keepalive_revert_failed">未恢复：%1$s</string>
@@ -310,6 +312,8 @@
     <string name="guard_auto_clean">自动清理</string>
     <string name="guard_auto_clean_off">关闭</string>
     <string name="guard_auto_clean_value">保留 %1$d 天</string>
+    <string name="guard_auto_save">自动保存日志</string>
+    <string name="guard_auto_save_tip">守护运行时自动将实时日志追加到日志保存位置（每天一个文件，自动保留最近 30 个）</string>
     <string name="guard_log_src_app">应用目录</string>
     <string name="guard_log_src_saf">自选目录</string>
     <string name="guard_channel_current_title">当前通道（点击收起）</string>

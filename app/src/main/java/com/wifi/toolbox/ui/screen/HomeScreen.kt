@@ -277,9 +277,10 @@ fun HomeScreen(onMenuClick: () -> Unit) {
 fun InfoCard(state: NetworkState, isDark: Boolean) {
     val containerColor = MaterialTheme.colorScheme.surfaceContainer
 
-    val textColor = if (isDark) Color(0xFFE3EAFC) else Color(0xFF1A1A1A)
-    val subTextColor = if (isDark) Color(0xFFAAAAAA) else Color(0xFF555555)
-    val iconTint = if (isDark) Color(0xFF6495ED) else Color(0xFF284893)
+    // 跟随总设置动态主题色/颜色种子（原硬编码蓝色不随主题变化）
+    val textColor = MaterialTheme.colorScheme.onSurface
+    val subTextColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val iconTint = MaterialTheme.colorScheme.primary
 
     val context = LocalContext.current
 

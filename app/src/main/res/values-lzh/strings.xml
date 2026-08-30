@@ -126,7 +126,7 @@
     <string name="guard_notif_action_exit">結束</string>
     <string name="guard_cat_keepalive">後臺保活</string>
     <string name="guard_keepalive_wakelock">息屏恆檢（喚醒鎖）</string>
-    <string name="guard_keepalive_wakelock_tip">持 CPU 喚醒鎖，息屏後檢測如常（微耗電，可關）</string>
+    <string name="guard_keepalive_wakelock_tip">保持進程於後臺運行。（部分系統或致殺後臺）</string>
     <string name="guard_keepalive_battery">電池優化白名單</string>
     <string name="guard_keepalive_battery_on">已豁免 ✓（系統彈窗可改）</string>
     <string name="guard_keepalive_battery_off">未豁免——點之申請（息屏省電凍結後臺）</string>
@@ -207,7 +207,7 @@
     <string name="guard_notify_fail">重連失敗通知</string>
     <string name="guard_notify_fail_tip">重連後仍不通時發系統通知</string>
     <string name="guard_notify_persistent">常駐守護通知</string>
-    <string name="guard_notify_persistent_tip">啓用後恆駐通知（停止時示「未運行」可速啓）；關則僅運行中顯示</string>
+    <string name="guard_notify_persistent_tip">開啟後恆駐通知</string>
     <string name="guard_stat_checks">總檢測</string>
     <string name="guard_stat_failures">斷網判定</string>
     <string name="guard_stat_heals">重連次數</string>
@@ -217,6 +217,7 @@
     <string name="guard_stat_events">事件歷史</string>
     <string name="guard_stat_reset">清零</string>
     <string name="guard_stat_reset_confirm">全部統計數據與事件歷史將清零，且無法復原。確定繼續？</string>
+    <string name="guard_stat_reset_desc">盡清統計與事件</string>
     <string name="guard_log_started">守護啟動，每 %1$ds 檢測一次</string>
     <string name="guard_log_check_error">檢測異常</string>
     <string name="guard_log_online">線上 ✓ %1$s</string>
@@ -271,6 +272,7 @@
     <string name="guard_keepalive_revert">復歸默認</string>
     <string name="guard_keepalive_all_ok">✓ 全效</string>
     <string name="guard_keepalive_partial">效 %1$d/4</string>
+    <string name="guard_keepalive_revert_partial">已復 %1$d/4</string>
     <string name="guard_keepalive_failed_items">未效：%1$s</string>
     <string name="guard_keepalive_revert_done">✓ 已復歸默認</string>
     <string name="guard_keepalive_revert_failed">未復：%1$s</string>
@@ -302,6 +304,8 @@
     <string name="guard_auto_clean">自動清理</string>
     <string name="guard_auto_clean_off">關閉</string>
     <string name="guard_auto_clean_value">保留 %1$d 天</string>
+    <string name="guard_auto_save">自動存錄</string>
+    <string name="guard_auto_save_tip">守護運行時自動存錄即時日誌（每日一檔，留近 30 檔）</string>
     <string name="guard_log_src_app">應用目錄</string>
     <string name="guard_log_src_saf">自選目錄</string>
     <string name="guard_channel_current_title">目前通道（點擊收起）</string>

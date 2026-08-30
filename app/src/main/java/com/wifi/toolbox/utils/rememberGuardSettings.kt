@@ -46,6 +46,7 @@ fun rememberGuardSettings(context: Context): MutableState<GuardSettings> {
                         putInt(GuardSettings.LOG_LEVELS_KEY, s.logLevels)
                         putString(GuardSettings.LOG_DIR_URI_KEY, s.logDirUri)
                         putInt(GuardSettings.AUTO_CLEAN_DAYS_KEY, s.autoCleanDays)
+                        putBoolean(GuardSettings.AUTO_SAVE_LOG_KEY, s.autoSaveLog)
                         putBoolean(GuardSettings.KEEP_ALIVE_WAKELOCK_KEY, s.keepAliveWakeLock)
                         putInt(GuardSettings.HEAL_CHANNEL_KEY, s.healChannel)
                         putBoolean(GuardSettings.START_ON_BOOT_KEY, s.startOnBoot)
