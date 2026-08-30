@@ -51,6 +51,14 @@ object KeepAliveHelper {
         "cmd appops set $pkg START_FOREGROUND_SERVICE allow"
     )
 
+    /** 恢复默认（撤销保活）：白名单移除 + appops 重置 default */
+    private fun revertCmds(pkg: String) = listOf(
+        "dumpsys deviceidle whitelist -$pkg",
+        "cmd appops set $pkg RUN_ANY_IN_BACKGROUND default",
+        "cmd appops set $pkg RUN_IN_BACKGROUND default",
+        "cmd appops set $pkg START_FOREGROUND_SERVICE default"
+    )
+
     /** Shizuku 通道执行（uid 2000 shell 权限足够） */
     suspend fun applyViaShizuku(pkg: String): KeepAliveResult {
         val sb = StringBuilder()
@@ -77,15 +85,44 @@ object KeepAliveHelper {
      * （Runtime.exec("su","-c",…) 经 Magisk/KernelSU 授权，无需 RootAIDL 服务）。
      * 授权失败/无 su 时输出不含 appops 校验行，调用方据此提示。
      */
-    suspend fun applyViaSu(pkg: String): KeepAliveResult {
-        // "设置命令; 回读校验" 全部拼进一条命令，单次 root shell 执行
-        val script = (cmds(pkg) + checkCmd(pkg)).joinToString("; ")
+    suspend fun applyViaSu(pkg: String): KeepAliveResult =
+        execScript((cmds(pkg) + checkCmd(pkg)).joinToString("; "), pkg, isRevert = false)
+
+    /** Shizuku 通道恢复默认（撤销保活） */
+    suspend fun revertViaShizuku(pkg: String): KeepAliveResult {
+        val sb = StringBuilder()
+        for (cmd in revertCmds(pkg)) {
+            try {
+                val r = ShizukuUtil.executeCommandSync(cmd)
+                sb.append(cmd).append(" -> exit=").append(r.exitCode).append('\n')
+            } catch (e: Exception) {
+                sb.append(cmd).append(" -> ").append(e.javaClass.simpleName).append('\n')
+            }
+        }
+        return try {
+            val check = ShizukuUtil.executeCommandSync(checkCmd(pkg))
+            sb.append(check.output.take(500))
+            parseRevertCheck(check.output, pkg).copy(raw = sb.toString())
+        } catch (e: Exception) {
+            sb.append("verify: ").append(e.javaClass.simpleName)
+            KeepAliveResult(false, false, false, false, sb.toString())
+        }
+    }
+
+    /** Root 直连通道恢复默认（撤销保活） */
+    suspend fun revertViaSu(pkg: String): KeepAliveResult =
+        execScript((revertCmds(pkg) + checkCmd(pkg)).joinToString("; "), pkg, isRevert = true)
+
+    /** su -c 单次 shell 执行脚本；isRevert 决定校验语义（恢复=期望 default/不在白名单） */
+    private suspend fun execScript(script: String, pkg: String, isRevert: Boolean): KeepAliveResult {
         val sb = StringBuilder()
         return try {
             val r = CommandRunner.executeCommandSync(script, true)
             sb.append("exit=").append(r.exitCode).append('\n')
                 .append(r.output.take(500))
-            parseCheck(r.output, pkg).copy(raw = sb.toString())
+            val parsed = if (isRevert) parseRevertCheck(r.output, pkg)
+            else parseCheck(r.output, pkg)
+            parsed.copy(raw = sb.toString())
         } catch (e: Exception) {
             // 无 su 二进制（IOException）或被拒绝授权
             sb.append(e.javaClass.simpleName).append(": ")
@@ -98,6 +135,30 @@ object KeepAliveHelper {
         "dumpsys deviceidle whitelist; cmd appops get $pkg RUN_ANY_IN_BACKGROUND; " +
                 "cmd appops get $pkg RUN_IN_BACKGROUND; " +
                 "cmd appops get $pkg START_FOREGROUND_SERVICE"
+
+    /**
+     * 恢复校验：全部 op 回到 default 且已不在 Doze 白名单。
+     * 注意：su 通道脚本里含包名（命令本身），不能用 contains(pkg) 判白名单，
+     * 改用逐行扫描 dumpsys 输出段中是否存在独立的包名行。
+     */
+    private fun parseRevertCheck(out: String, pkg: String): KeepAliveResult {
+        fun opDefault(op: String): Boolean {
+            val m = Regex("$op:\\s*(\\w+)", RegexOption.IGNORE_CASE).find(out)
+            return m?.groupValues?.get(1)?.lowercase() == "default"
+        }
+        // 白名单段在 appops 输出之前：只检查首个 "Package" 或白名单头行之前的段
+        val whitelistPart = out.substringBefore("RUN_ANY_IN_BACKGROUND:")
+        val dozeRemoved = !whitelistPart.split('\n').any {
+            it.trim() == pkg || it.trim().endsWith(".$pkg") || it.trim() == "*$pkg"
+        }
+        return KeepAliveResult(
+            doze = dozeRemoved,
+            runAnyBg = opDefault("RUN_ANY_IN_BACKGROUND"),
+            runBg = opDefault("RUN_IN_BACKGROUND"),
+            fgs = opDefault("START_FOREGROUND_SERVICE"),
+            raw = ""
+        )
+    }
 
     /**
      * 解析校验输出：appops 状态提取不到时不算通过（避免命令失败误报 ✓）。

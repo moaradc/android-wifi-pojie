@@ -158,7 +158,6 @@
     <string name="guard_notif_heal_fail_title">Reconnect failed</string>
     <string name="guard_notif_heal_fail_text">%1$s still offline after reconnect; will retry with backoff</string>
     <string name="guard_cat_probe">Detection methods</string>
-    <string name="guard_probe_tip">Connected ≠ online; any passing probe means online. Keep HTTP 204 enabled</string>
     <string name="guard_probe_http">HTTP 204 probe</string>
     <string name="guard_probe_http_tip">AOSP standard probe, dual endpoints, recommended</string>
     <string name="guard_probe_dns">DNS probe</string>
@@ -190,7 +189,6 @@
     <string name="guard_strategy_2">Standard: disconnect+reconnect (recommended)</string>
     <string name="guard_strategy_3">Powerful: escalating steps</string>
     <string name="guard_strategy_4">Ultimate: escalating + targeted connect</string>
-    <string name="guard_strategy_tip">Standard for fake connections, strong for sleep faults; escalation stops on recovery</string>
     <string name="guard_heal_verify_timeout">Verify timeout after reconnect</string>
     <string name="guard_sec_value">%1$ds</string>
     <string name="guard_cooldown_base">Backoff base</string>
@@ -215,7 +213,6 @@
     <string name="guard_stat_heals">Reconnects</string>
     <string name="guard_stat_recovered">Recovered</string>
     <string name="guard_stat_action_rate">Action success rate</string>
-    <string name="guard_stat_action_tip">Effective action reveals the fault: reassociate = link stall; wifi cycle = driver sleep</string>
     <string name="guard_stat_events">Event history</string>
     <string name="guard_stat_reset">Reset</string>
     <string name="guard_log_started">Guard started, checking every %1$ds</string>
@@ -262,15 +259,19 @@
     <string name="guard_max_attempts">Retry attempt limit</string>
     <string name="guard_max_attempts_unlimited">Unlimited (keep retrying with backoff)</string>
     <string name="guard_max_attempts_value">Up to %1$d attempts</string>
-    <string name="guard_max_attempts_tip">Pauses healing after consecutive failures (checks continue), auto-resumes on recovery or manual check; unlimited may spin while router is off</string>
     <string name="guard_strategy_5">Custom: pick actions</string>
     <string name="guard_strategy_6">Best success: %1$s</string>
-    <string name="guard_strategy_best_tip">Current best action: %1$s (picked by history success count)</string>
     <string name="guard_custom_actions_tip">Runs light to heavy, stops on recovery; defaults to Standard if none</string>
     <string name="guard_custom_actions">Custom heal actions</string>
     <string name="guard_custom_actions_value">%1$d selected</string>
     <string name="guard_custom_actions_none">None selected, standard tier applies</string>
     <string name="guard_keepalive_su_failed">Root authorization failed: Magisk/KernelSU missing or denied</string>
+    <string name="guard_keepalive_revert">Revert to defaults</string>
+    <string name="guard_keepalive_all_ok">✓ All applied</string>
+    <string name="guard_keepalive_partial">%1$d/4 applied</string>
+    <string name="guard_keepalive_failed_items">not applied: %1$s</string>
+    <string name="guard_keepalive_revert_done">✓ Reverted to defaults</string>
+    <string name="guard_keepalive_revert_failed">not reverted: %1$s</string>
     <string name="guard_action_reassociate">Reassociate</string>
     <string name="guard_action_reassociate_tip">802.11 reassociation without leaving the link, fastest (1-3s)</string>
     <string name="guard_action_reconnect">Full reconnect</string>
@@ -303,7 +304,7 @@
     <string name="guard_channel_heal">Heal</string>
     <string name="guard_channel_copied">Channel info copied</string>
     <string name="guard_notif_stopped">Guard not running — tap to start</string>
-    <string name="guard_channel_tip">Only healing and ICMP probe use privileged channels (auto=Shizuku→Root→local); HTTP/DNS/capability need none</string>
+    <string name="guard_channel_tip">Only healing and ICMP use privileged channels; HTTP/DNS/capability stay in-app</string>
     <string name="guard_probe_copied">Probe result copied</string>
     <string name="guard_events_file_header">WiFi Toolbox — Network Guard event history</string>
     <string name="guard_events_copied">Copied %1$d events</string>

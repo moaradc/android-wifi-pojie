@@ -905,12 +905,6 @@ private fun GuardSettingsPage(settings: MutableState<GuardSettings>, app: Toolbo
             // ---- 检测设置 ----
             item { PreferenceCategory(title = { Text(stringResource(R.string.guard_cat_probe)) }) }
             item {
-                BannerTip(
-                    text = stringResource(R.string.guard_probe_tip),
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
-                )
-            }
-            item {
                 CheckboxPreference(
                     value = probeHttp,
                     onValueChange = { on ->
@@ -1095,24 +1089,6 @@ private fun GuardSettingsPage(settings: MutableState<GuardSettings>, app: Toolbo
                     )
                 }
             }
-            // ---- 高成功率档当前优选信息 ----
-            if (s.healStrategy == 6) {
-                item {
-                    BannerTip(
-                        text = stringResource(
-                            R.string.guard_strategy_best_tip,
-                            bestAction ?: "reconnect"
-                        ),
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
-                    )
-                }
-            }
-            item {
-                BannerTip(
-                    text = stringResource(R.string.guard_strategy_tip),
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
-                )
-            }
             item {
                 val state = remember { mutableStateOf(s.healVerifyTimeoutSec.toFloat()) }
                 SliderPreference(
@@ -1172,12 +1148,6 @@ private fun GuardSettingsPage(settings: MutableState<GuardSettings>, app: Toolbo
                         )
                     },
                     type = ListPreferenceType.DROPDOWN_MENU
-                )
-            }
-            item {
-                BannerTip(
-                    text = stringResource(R.string.guard_max_attempts_tip),
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
                 )
             }
             item {
@@ -1617,7 +1587,9 @@ private fun customActionTip(actionId: String): String = stringResource(
  * - Shizuku 按钮经 uid 2000 shell 逐条执行保活命令；
  * - Root 按钮直接 su -c 单次 shell 跑完全部命令（独立通道，不依赖应用内 RootAIDL
  *   服务，有 Magisk/KernelSU 授权即可）；
- * 命令含 Doze 白名单 + 后台运行 appops + 前台服务 appops，执行后逐项展示结果。
+ * - 恢复默认按钮撤销保活命令（白名单移除 + appops 重置 default），
+ *   自动选通道：Shizuku 可用走 Shizuku，否则 su；
+ * 结果语义化显示：全部生效 ✓；部分生效时才列技术项（Doze/RUN_ANY/RUN/FGS）便于排障。
  */
 @Composable
 private fun KeepAliveRow() {
@@ -1626,8 +1598,10 @@ private fun KeepAliveRow() {
     val scope = rememberCoroutineScope()
     var shizukuRunning by remember { mutableStateOf(false) }
     var rootRunning by remember { mutableStateOf(false) }
+    var revertRunning by remember { mutableStateOf(false) }
     var shizukuResult by remember { mutableStateOf<KeepAliveHelper.KeepAliveResult?>(null) }
     var rootResult by remember { mutableStateOf<KeepAliveHelper.KeepAliveResult?>(null) }
+    var revertResult by remember { mutableStateOf<KeepAliveHelper.KeepAliveResult?>(null) }
     var toastMsg by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(toastMsg) {
@@ -1639,14 +1613,19 @@ private fun KeepAliveRow() {
 
     val pkg = context.packageName
 
-    fun resultText(r: KeepAliveHelper.KeepAliveResult): String {
-        val marks = listOf(
-            "Doze " + if (r.doze) "✓" else "✗",
-            "RUN_ANY " + if (r.runAnyBg) "✓" else "✗",
-            "RUN " + if (r.runBg) "✓" else "✗",
-            "FGS " + if (r.fgs) "✓" else "✗"
+    /** 语义化结果：全部生效 ✓；否则 生效 N/4 · 未生效项（技术名便于排障） */
+    fun resultText(r: KeepAliveHelper.KeepAliveResult, okText: String, partialText: String,
+                   failedText: String): String {
+        if (r.all) return okText
+        val failed = listOfNotNull(
+            if (!r.doze) "Doze" else null,
+            if (!r.runAnyBg) "RUN_ANY" else null,
+            if (!r.runBg) "RUN" else null,
+            if (!r.fgs) "FGS" else null
         )
-        return marks.joinToString(" · ")
+        val n = 4 - failed.size
+        val head = partialText.format(n)
+        return if (failed.isEmpty()) head else "$head · ${failedText.format(failed.joinToString(", "))}"
     }
 
     Column(modifier = Modifier.padding(horizontal = 12.dp)) {
@@ -1702,19 +1681,61 @@ private fun KeepAliveRow() {
                 )
             }
         }
+        // 恢复默认（撤销保活命令）：Shizuku 可用则 Shizuku，否则 su
+        OutlinedButton(
+            onClick = {
+                revertRunning = true
+                scope.launch {
+                    val viaShizuku = WifiHealer.isShizukuAvailable()
+                    val r = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        if (viaShizuku) KeepAliveHelper.revertViaShizuku(pkg)
+                        else KeepAliveHelper.revertViaSu(pkg)
+                    }
+                    revertResult = r
+                    revertRunning = false
+                    if (!viaShizuku && !r.raw.contains("RUN_ANY_IN_BACKGROUND")) {
+                        toastMsg = context.getString(R.string.guard_keepalive_su_failed)
+                    }
+                }
+            },
+            enabled = !revertRunning,
+            modifier = Modifier.padding(top = 4.dp)
+        ) {
+            Text(
+                if (revertRunning) stringResource(R.string.guard_keepalive_running)
+                else stringResource(R.string.guard_keepalive_revert)
+            )
+        }
+        val allOk = stringResource(R.string.guard_keepalive_all_ok)
+        val partial = stringResource(R.string.guard_keepalive_partial)
+        val failedItems = stringResource(R.string.guard_keepalive_failed_items)
+        val revertDone = stringResource(R.string.guard_keepalive_revert_done)
+        val revertFailed = stringResource(R.string.guard_keepalive_revert_failed)
         shizukuResult?.let {
             Text(
-                "Shizuku: " + resultText(it),
+                "Shizuku: " + resultText(it, allOk, partial, failedItems),
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = if (it.all) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 4.dp)
             )
         }
         rootResult?.let {
             Text(
-                "Root: " + resultText(it),
+                "Root: " + resultText(it, allOk, partial, failedItems),
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = if (it.all) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 2.dp)
+            )
+        }
+        revertResult?.let {
+            Text(
+                stringResource(R.string.guard_keepalive_revert) + ": " +
+                        resultText(it, revertDone, partial, revertFailed),
+                style = MaterialTheme.typography.bodySmall,
+                color = if (it.all) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 2.dp)
             )
         }
@@ -1859,11 +1880,6 @@ private fun StatsPage(app: ToolboxApp?, logDirUri: String) {
                                 }
                             }
                         Spacer(Modifier.height(4.dp))
-                        Text(
-                            stringResource(R.string.guard_stat_action_tip),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
                     }
                 }
             }

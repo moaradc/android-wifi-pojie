@@ -160,7 +160,6 @@
     <string name="guard_notif_heal_fail_text">%1$s 重连后仍无法上网，将按退避策略继续尝试</string>
 
     <string name="guard_cat_probe">检测方式</string>
-    <string name="guard_probe_tip">已连接不等于能上网；任一探测通过即判在线，建议至少启用 HTTP 204</string>
     <string name="guard_probe_http">HTTP 204 探测</string>
     <string name="guard_probe_http_tip">AOSP 标准探测，双端点互备，最推荐</string>
     <string name="guard_probe_dns">DNS 解析探测</string>
@@ -194,7 +193,6 @@
     <string name="guard_strategy_2">标准档：断开重连（推荐）</string>
     <string name="guard_strategy_3">强力档：逐级升压</string>
     <string name="guard_strategy_4">终极档：升压+定向重连</string>
-    <string name="guard_strategy_tip">假连接选标准档，休眠类故障选强力档；升压每步验证，恢复即停</string>
     <string name="guard_heal_verify_timeout">重连后验证超时</string>
     <string name="guard_sec_value">%1$ds</string>
     <string name="guard_cooldown_base">退避基数</string>
@@ -221,7 +219,6 @@
     <string name="guard_stat_heals">重连次数</string>
     <string name="guard_stat_recovered">恢复成功</string>
     <string name="guard_stat_action_rate">自愈动作有效率</string>
-    <string name="guard_stat_action_tip">有效动作即故障诊断：重协商有效=链路假死；总开关有效=驱动休眠</string>
     <string name="guard_stat_events">事件历史</string>
     <string name="guard_stat_reset">清零</string>
 
@@ -269,15 +266,19 @@
     <string name="guard_max_attempts">退避次数限制</string>
     <string name="guard_max_attempts_unlimited">无限制（一直退避重试）</string>
     <string name="guard_max_attempts_value">最多 %1$d 次</string>
-    <string name="guard_max_attempts_tip">连续失败达上限后暂停自愈（检测继续），网络恢复或手动检测后自动恢复；无限制会在路由器断电时空转</string>
     <string name="guard_strategy_5">自定义档：自选动作</string>
     <string name="guard_strategy_6">高成功率档：%1$s</string>
-    <string name="guard_strategy_best_tip">当前优选动作：%1$s（按历史成功次数动态选取）</string>
     <string name="guard_custom_actions_tip">由轻到重执行，任一动作后恢复即停；未勾选时按标准档</string>
     <string name="guard_custom_actions">自愈动作组合</string>
     <string name="guard_custom_actions_value">已选 %1$d 项</string>
     <string name="guard_custom_actions_none">未选择，按标准档执行</string>
     <string name="guard_keepalive_su_failed">Root 授权失败：未安装 Magisk/KernelSU 或已拒绝授权</string>
+    <string name="guard_keepalive_revert">恢复默认</string>
+    <string name="guard_keepalive_all_ok">✓ 全部生效</string>
+    <string name="guard_keepalive_partial">生效 %1$d/4</string>
+    <string name="guard_keepalive_failed_items">未生效：%1$s</string>
+    <string name="guard_keepalive_revert_done">✓ 已恢复默认</string>
+    <string name="guard_keepalive_revert_failed">未恢复：%1$s</string>
     <string name="guard_action_reassociate">重协商（reassociate）</string>
     <string name="guard_action_reassociate_tip">802.11 链路重协商，不断链，速度最快（1-3s）</string>
     <string name="guard_action_reconnect">完整重连（reconnect）</string>
@@ -310,7 +311,7 @@
     <string name="guard_channel_heal">自愈</string>
     <string name="guard_channel_copied">已复制通道信息</string>
     <string name="guard_notif_stopped">守护未运行，点通知或「开启」启动</string>
-    <string name="guard_channel_tip">仅自愈与 ICMP 探测用特权通道（自动=Shizuku→Root→本地回退）；HTTP/DNS/能力位走应用层无需特权</string>
+    <string name="guard_channel_tip">仅自愈与 ICMP 探测用特权通道；HTTP/DNS/能力位走应用层</string>
     <string name="guard_probe_copied">已复制探测结果</string>
     <string name="guard_events_file_header">WiFi工具箱 网络守护事件历史</string>
     <string name="guard_events_copied">已复制 %1$d 条事件</string>
