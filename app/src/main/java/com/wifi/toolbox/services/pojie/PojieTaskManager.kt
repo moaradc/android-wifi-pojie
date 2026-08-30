@@ -300,7 +300,13 @@ class PojieTaskManager(
             }
         }
 
-        worker.cleanConnection(settings)
+        // 成功时保持连接不断开：用户破解成功的目的就是连上该网络。
+        // 历史缺陷：成功后仍执行 cleanConnection —— API29 模式注销 specifier
+        // 回调直接拆掉刚建立的连接；Shizuku/API 模式（enableMode 1/2）主动
+        // disconnect/disableNetwork 同样立即断开。仅失败/超时/中断需要断开复位。
+        if (result != SinglePojieTask.RESULT_SUCCESS) {
+            worker.cleanConnection(settings)
+        }
 
         if (result == SinglePojieTask.RESULT_CANCEL) return
 
@@ -374,7 +380,7 @@ class PojieTaskManager(
 
     private fun updateHistory(app: ToolboxApp, ssid: String) {
         getTask(app, ssid)?.let { task ->
-            app.pojieHistory.addOrUpdateHistory(
+            app.pojieHistory.updateAttempt(
                 PojieHistoryItem(
                     task.ssid,
                     task.tryList,

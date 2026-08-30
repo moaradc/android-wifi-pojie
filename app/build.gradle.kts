@@ -28,8 +28,8 @@ android {
         minSdk = 24
         //noinspection ExpiredTargetSdkVersion 注:WifiManager需要
         targetSdk = 28
-        versionCode = 21
-        versionName = "v3.0.0_Alpha-22"
+        versionCode = 22
+        versionName = "v3.0.0_Alpha-23"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -109,6 +109,7 @@ dependencies {
     implementation(libs.miuix)
     implementation(libs.coil.compose)
     implementation(libs.hiddenapibypass)
+    implementation(libs.tinypinyin) //注:汉字 SSID 拼音首字母分组（A-Z 索引栏）
 
     implementation(platform(libs.editor.bom))
     implementation(libs.editor)

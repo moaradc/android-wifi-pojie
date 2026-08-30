@@ -316,6 +316,8 @@ fun rememberPojieWifiController(
             }
 
             override fun disconnectWifi() {
+                // API29 specifier 连接只能靠注销请求断开，优先处理
+                com.wifi.toolbox.services.pojie.ConnectWorker.releaseActiveApi29Request(context)
                 when (settings.enableMode) {
                     1 -> {
                         ShizukuUtil.disconnectWifi(); trigger++

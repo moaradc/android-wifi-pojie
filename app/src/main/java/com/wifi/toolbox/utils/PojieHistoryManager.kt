@@ -56,9 +56,33 @@ interface PojieDao {
     @Query("DELETE FROM password_items WHERE historyId = :ssid")
     suspend fun deleteOldPasswords(ssid: String)
 
+    @Query("SELECT * FROM history_metadata WHERE ssid = :ssid")
+    suspend fun getMetadata(ssid: String): HistoryEntity?
+
     @Transaction
     suspend fun fullUpsert(item: PojieHistoryItem) {
         insertMetadata(HistoryEntity(item.ssid, item.progress, item.password, item.lasttime))
+        deleteOldPasswords(item.ssid)
+        val entities = item.passwords.map { PasswordEntity(historyId = item.ssid, password = it) }
+        insertPasswords(entities)
+    }
+
+    /**
+     * 进度型更新（每次尝试密码后调用）：只更新 progress/lasttime 与尝试密码列表，
+     * 【绝不触碰 successfulPassword】。
+     *
+     * 历史缺陷：原 updateHistory 用 fullUpsert 写入 password=null 的
+     * PojieHistoryItem，REPLACE 覆盖会把已破解成功的密码清空——重新破解同一
+     * SSID 时历史密码丢失，管理器已保存页的破解记录随之消失。
+     */
+    @Transaction
+    suspend fun upsertAttempt(item: PojieHistoryItem) {
+        val existing = getMetadata(item.ssid)
+        if (existing == null) {
+            insertMetadata(HistoryEntity(item.ssid, item.progress, null, item.lasttime))
+        } else {
+            updateProgress(item.ssid, item.progress, item.lasttime)
+        }
         deleteOldPasswords(item.ssid)
         val entities = item.passwords.map { PasswordEntity(historyId = item.ssid, password = it) }
         insertPasswords(entities)
@@ -117,6 +141,14 @@ class PojieHistoryManager(context: Context) {
         scope.launch {
             val itemWithTime = item.copy(lasttime = System.currentTimeMillis())
             dao.fullUpsert(itemWithTime)
+        }
+    }
+
+    /** 进度型更新：保留既有 successfulPassword（见 PojieDao#upsertAttempt） */
+    fun updateAttempt(item: PojieHistoryItem) {
+        scope.launch {
+            val itemWithTime = item.copy(lasttime = System.currentTimeMillis())
+            dao.upsertAttempt(itemWithTime)
         }
     }
 

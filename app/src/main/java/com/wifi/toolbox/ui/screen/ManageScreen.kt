@@ -2,11 +2,15 @@ package com.wifi.toolbox.ui.screen
 
 import android.widget.Toast
 import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -21,17 +25,21 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.wifi.toolbox.R
 import com.wifi.toolbox.ToolboxApp
 import com.wifi.toolbox.structs.WifiInfo
 import com.wifi.toolbox.ui.items.NavContainer
 import com.wifi.toolbox.ui.items.NavPage
+import kotlinx.coroutines.launch
 import com.wifi.toolbox.ui.items.TagItem
 import com.wifi.toolbox.ui.items.TagType
 import com.wifi.toolbox.utils.*
@@ -186,7 +194,7 @@ private fun ScanTabPage(controller: ManagerController, app: ToolboxApp) {
                         ScanNetworkCard(
                             wifi = wifi,
                             expanded = expandedSsid == wifi.ssid,
-                            isCurrent = controller.currentInfo.ssid == wifi.ssid,
+                            isCurrent = controller.isCurrentNetwork(wifi.ssid, -1),
                             onToggle = {
                                 expandedSsid = if (expandedSsid == wifi.ssid) null else wifi.ssid
                             }
@@ -416,13 +424,100 @@ private fun copyText(context: android.content.Context, text: String) {
 
 // ==================== Tab2：已保存网络 ====================
 
+/** 已保存页筛选：0=全部 1=系统保存 2=破解记录 */
+private val SAVED_FILTER_LABELS = intArrayOf(
+    R.string.mgr_filter_all, R.string.mgr_filter_system, R.string.mgr_filter_pojie
+)
+
+/** 已保存页排序：0=名称A→Z 1=名称Z→A 2=最近破解优先 */
+private val SAVED_SORT_LABELS = intArrayOf(
+    R.string.mgr_sort_az, R.string.mgr_sort_za, R.string.mgr_sort_recent
+)
+
+/** 字母分组（letter=' ' 表示平铺模式——「最近破解」排序不分组，隐藏索引栏） */
+private data class SavedSection(val letter: Char, val entries: List<SavedNetworkEntry>)
+
+private fun buildSavedSections(
+    entries: List<SavedNetworkEntry>, sortIdx: Int
+): List<SavedSection> {
+    if (sortIdx == 2) {
+        // 最近破解优先：破解记录按时间倒序在前，其余按名称 A-Z 平铺
+        val (cracked, rest) = entries.partition { it.hasPojieRecord }
+        val list = cracked.sortedByDescending { it.pojieTime } +
+                rest.sortedBy { it.ssid.lowercase() }
+        return if (list.isEmpty()) emptyList() else listOf(SavedSection(' ', list))
+    }
+    val grouped = entries.groupBy { PinyinIndex.sectionKey(it.ssid) }
+    return if (sortIdx == 1) {
+        grouped.toSortedMap(compareByDescending { it }).map { (l, e) ->
+            SavedSection(l, e.sortedByDescending { it.ssid.lowercase() })
+        }
+    } else {
+        grouped.toSortedMap().map { (l, e) ->
+            SavedSection(l, e.sortedBy { it.ssid.lowercase() })
+        }
+    }
+}
+
+/** 每个分组首项在 LazyColumn 中的 flat 下标（含 stickyHeader 占位） */
+private fun sectionFirstIndexMap(sections: List<SavedSection>): Map<Char, Int> {
+    val map = LinkedHashMap<Char, Int>()
+    var cursor = 0
+    for (s in sections) {
+        if (s.letter != ' ') {
+            map[s.letter] = cursor
+            cursor++
+        }
+        cursor += s.entries.size
+    }
+    return map
+}
+
+/** flat 下标 → 所属分组字母 */
+private fun letterAtFlatIndex(sections: List<SavedSection>, flatIndex: Int): Char? {
+    var cursor = 0
+    for (s in sections) {
+        if (s.letter != ' ') {
+            if (flatIndex == cursor) return s.letter
+            cursor++
+        }
+        if (flatIndex < cursor + s.entries.size) return s.letter
+        cursor += s.entries.size
+    }
+    return sections.lastOrNull()?.letter
+}
+
+/** 索引栏拖到无条目的字母时就近落位到最近的有条目分组 */
+private fun scrollTargetFor(
+    letter: Char, firstIndex: Map<Char, Int>
+): Int? {
+    firstIndex[letter]?.let { return it }
+    val ordered = PinyinIndex.RAIL_LETTERS
+    val pos = ordered.indexOf(letter)
+    if (pos == -1) return null
+    for (d in 1 until ordered.size) {
+        if (pos + d < ordered.size) firstIndex[ordered[pos + d]]?.let { return it }
+        if (pos - d >= 0) firstIndex[ordered[pos - d]]?.let { return it }
+    }
+    return null
+}
+
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SavedTabPage(controller: ManagerController) {
     val context = LocalContext.current
     var revealSsid by rememberSaveable { mutableStateOf<String?>(null) }
     var confirmForget by rememberSaveable { mutableStateOf<String?>(null) }
+    var filterIdx by rememberSaveable { mutableIntStateOf(0) }
+    var sortIdx by rememberSaveable { mutableIntStateOf(0) }
+    var sortMenuOpen by remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
+    val railScope = rememberCoroutineScope()
 
-    LaunchedEffect(Unit) { controller.refreshSaved() }
+    LaunchedEffect(Unit) {
+        controller.refreshSaved()
+        controller.refreshCurrent()
+    }
     LaunchedEffect(controller.opMessage) {
         controller.opMessage?.let {
             Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
@@ -459,7 +554,28 @@ private fun SavedTabPage(controller: ManagerController) {
         }
     }
 
+    val allEntries = controller.savedEntries
+    val filtered = remember(allEntries, filterIdx) {
+        when (filterIdx) {
+            1 -> allEntries.filter { it.fromSystem }
+            2 -> allEntries.filter { it.hasPojieRecord }
+            else -> allEntries
+        }
+    }
+    val sections = remember(filtered, sortIdx) { buildSavedSections(filtered, sortIdx) }
+    val firstIndex = remember(sections) { sectionFirstIndexMap(sections) }
+    val railPresent = remember(sections) {
+        sections.map { it.letter }.filter { it != ' ' }.toSet()
+    }
+
+    // 当前滚动位置对应的分组字母（驱动索引栏高亮）
+    val currentLetter by remember(sections) {
+        derivedStateOf { letterAtFlatIndex(sections, listState.firstVisibleItemIndex) }
+    }
+    var railLetter by remember { mutableStateOf<Char?>(null) }
+
     Column(Modifier.fillMaxSize()) {
+        // 行1：数量 + 来源 + 刷新
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -467,7 +583,7 @@ private fun SavedTabPage(controller: ManagerController) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = stringResource(R.string.mgr_networks_count, controller.savedEntries.size),
+                text = stringResource(R.string.mgr_networks_count, filtered.size),
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -492,34 +608,255 @@ private fun SavedTabPage(controller: ManagerController) {
             }
         }
 
-        if (controller.savedEntries.isEmpty() && !controller.savedLoading) {
-            EmptyHint(
-                icon = Icons.Rounded.Dns,
-                title = stringResource(R.string.mgr_saved_empty),
-                tip = stringResource(R.string.mgr_saved_empty_tip),
-                actionText = null, onAction = null
-            )
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(
-                    start = 16.dp, end = 16.dp, bottom = 24.dp
-                ),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                items(controller.savedEntries, key = { it.ssid }) { entry ->
-                    SavedNetworkCard(
-                        entry = entry,
-                        isCurrent = controller.currentInfo.ssid == entry.ssid,
-                        revealed = revealSsid == entry.ssid,
-                        onToggleReveal = {
-                            revealSsid = if (revealSsid == entry.ssid) null else entry.ssid
-                        },
-                        onConnect = { controller.connectSaved(entry) },
-                        onForget = { confirmForget = entry.ssid },
-                        onDeleteRecord = { controller.deletePojieRecord(entry.ssid) }
+        // 行2：筛选 + 排序
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            SAVED_FILTER_LABELS.forEachIndexed { i, res ->
+                FilterChip(
+                    selected = filterIdx == i,
+                    onClick = { filterIdx = i },
+                    label = {
+                        Text(
+                            stringResource(res),
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                    },
+                    modifier = Modifier.padding(end = 8.dp)
+                )
+            }
+            Spacer(Modifier.weight(1f))
+            Box {
+                IconButton(
+                    onClick = { sortMenuOpen = true },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        Icons.Rounded.SortByAlpha,
+                        contentDescription = stringResource(R.string.mgr_sort_hint)
                     )
                 }
+                DropdownMenu(
+                    expanded = sortMenuOpen,
+                    onDismissRequest = { sortMenuOpen = false }
+                ) {
+                    SAVED_SORT_LABELS.forEachIndexed { i, res ->
+                        DropdownMenuItem(
+                            text = { Text(stringResource(res)) },
+                            trailingIcon = {
+                                if (sortIdx == i) {
+                                    Icon(
+                                        Icons.Rounded.Check,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            },
+                            onClick = {
+                                sortIdx = i
+                                sortMenuOpen = false
+                            }
+                        )
+                    }
+                }
+            }
+        }
+
+        when {
+            controller.savedLoading && allEntries.isEmpty() -> {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+            }
+
+            sections.isEmpty() -> {
+                EmptyHint(
+                    icon = Icons.Rounded.Dns,
+                    title = stringResource(
+                        if (allEntries.isEmpty()) R.string.mgr_saved_empty
+                        else R.string.mgr_filter_empty
+                    ),
+                    tip = stringResource(
+                        if (allEntries.isEmpty()) R.string.mgr_saved_empty_tip
+                        else R.string.mgr_filter_empty_tip
+                    ),
+                    actionText = null, onAction = null
+                )
+            }
+
+            else -> {
+                Box(Modifier.fillMaxSize()) {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(
+                            start = 16.dp, end = 30.dp, bottom = 24.dp
+                        ),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        sections.forEach { section ->
+                            if (section.letter != ' ') {
+                                stickyHeader(key = "h_${section.letter}") {
+                                    LetterHeader(section.letter, section.entries.size)
+                                }
+                            }
+                            items(section.entries, key = { it.ssid }) { entry ->
+                                SavedNetworkCard(
+                                    entry = entry,
+                                    isCurrent = controller.isCurrentNetwork(
+                                        entry.ssid, entry.networkId
+                                    ),
+                                    revealed = revealSsid == entry.ssid,
+                                    connecting = controller.connectingSsid == entry.ssid,
+                                    connectEnabled = controller.connectingSsid == null,
+                                    onToggleReveal = {
+                                        revealSsid = if (revealSsid == entry.ssid) null else entry.ssid
+                                    },
+                                    onConnect = { controller.connectSaved(entry) },
+                                    onForget = { confirmForget = entry.ssid },
+                                    onDeleteRecord = { controller.deletePojieRecord(entry.ssid) }
+                                )
+                            }
+                        }
+                    }
+
+                    // 右侧 A-Z 索引栏（仅字母分组排序时显示）
+                    if (sortIdx != 2 && sections.isNotEmpty()) {
+                        AlphabetRail(
+                            letters = PinyinIndex.RAIL_LETTERS,
+                            present = railPresent,
+                            active = railLetter ?: currentLetter,
+                            modifier = Modifier
+                                .align(Alignment.CenterEnd)
+                                .padding(end = 4.dp)
+                        ) { ch, dragging ->
+                            railLetter = if (dragging) ch else null
+                            if (ch != null) {
+                                scrollTargetFor(ch, firstIndex)?.let { target ->
+                                    railScope.launch { listState.scrollToItem(target) }
+                                }
+                            }
+                        }
+                    }
+
+                    // 拖动索引栏时的中央大字母气泡
+                    railLetter?.let { ch ->
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            modifier = Modifier
+                                .align(Alignment.Center)
+                                .size(84.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = ch.toString(),
+                                    style = MaterialTheme.typography.headlineLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 字母分组吸顶标题 */
+@Composable
+private fun LetterHeader(letter: Char, count: Int) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.background)
+            .padding(start = 4.dp, top = 4.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = letter.toString(),
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            text = stringResource(R.string.mgr_networks_count, count),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+/**
+ * 右侧 A-Z 索引栏（通讯录风格）：
+ * - 当前分组字母高亮放大（滚动位置驱动）
+ * - 拖动/点击任意字母滚动列表到对应分组（无条目字母就近落位）
+ * - 有条目的字母正常显示，无条目的字母淡显
+ */
+@Composable
+private fun AlphabetRail(
+    letters: List<Char>,
+    present: Set<Char>,
+    active: Char?,
+    modifier: Modifier = Modifier,
+    onTouch: (Char?, Boolean) -> Unit
+) {
+    var railHeightPx by remember { mutableFloatStateOf(0f) }
+
+    fun pick(y: Float): Char? {
+        if (railHeightPx <= 0f) return null
+        val idx = (y / railHeightPx * letters.size).toInt()
+            .coerceIn(0, letters.size - 1)
+        return letters[idx]
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxHeight()
+            .width(22.dp)
+            .onGloballyPositioned { railHeightPx = it.size.height.toFloat() }
+            .pointerInput(letters) {
+                detectTapGestures { offset ->
+                    pick(offset.y)?.let { onTouch(it, false) }
+                }
+            }
+            .pointerInput(letters) {
+                detectDragGestures(
+                    onDragStart = { offset ->
+                        pick(offset.y)?.let { onTouch(it, true) }
+                    },
+                    onDrag = { change, _ ->
+                        pick(change.position.y)?.let { onTouch(it, true) }
+                    },
+                    onDragEnd = { onTouch(null, false) },
+                    onDragCancel = { onTouch(null, false) }
+                )
+            }
+    ) {
+        letters.forEach { ch ->
+            val isActive = active == ch
+            val isPresent = ch in present
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = ch.toString(),
+                    fontSize = if (isActive) 12.sp else 9.sp,
+                    fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
+                    color = when {
+                        isActive -> MaterialTheme.colorScheme.primary
+                        isPresent -> MaterialTheme.colorScheme.onSurfaceVariant
+                        else -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)
+                    }
+                )
             }
         }
     }
@@ -530,6 +867,8 @@ private fun SavedNetworkCard(
     entry: SavedNetworkEntry,
     isCurrent: Boolean,
     revealed: Boolean,
+    connecting: Boolean,
+    connectEnabled: Boolean,
     onToggleReveal: () -> Unit,
     onConnect: () -> Unit,
     onForget: () -> Unit,
@@ -571,8 +910,8 @@ private fun SavedNetworkCard(
                     stringResource(R.string.mgr_saved_mark),
                     TagType.Secondary
                 )
-                if (entry.passwordFromPojie) TagItem(
-                    stringResource(R.string.mgr_pwd_from_pojie),
+                if (entry.hasPojieRecord) TagItem(
+                    stringResource(R.string.mgr_cracked_mark),
                     TagType.Tertiary
                 )
             }
@@ -634,19 +973,32 @@ private fun SavedNetworkCard(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(
                     onClick = onConnect,
+                    enabled = connectEnabled,
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                     modifier = Modifier.weight(1f)
                 ) {
-                    Icon(
-                        Icons.Rounded.Link,
-                        contentDescription = null,
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        stringResource(R.string.mgr_connect),
-                        style = MaterialTheme.typography.labelMedium
-                    )
+                    if (connecting) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(14.dp),
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            stringResource(R.string.mgr_connecting_btn),
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                    } else {
+                        Icon(
+                            Icons.Rounded.Link,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            stringResource(R.string.mgr_connect),
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                    }
                 }
                 if (entry.networkId >= 0) {
                     OutlinedButton(

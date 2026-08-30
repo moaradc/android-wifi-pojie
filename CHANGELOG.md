@@ -1,3 +1,13 @@
+# v3.0.0_Alpha-23
+
+- 修复：密码字典破解成功后 WiFi 立即断开——成功路径此前仍执行 cleanConnection：API29 系统通道（WifiNetworkSpecifier）注销回调即释放请求来源的网络（官方文档：unregisterNetworkCallback "possibly releases networks originating from a request"），且 onAvailable 内自注销回调等于连上即拆；Shizuku/API 通道在「断开方式」为 Shizuku/系统 API 时主动 disconnect/disableNetwork 同样立即断开。现成功后保持连接不断开，仅失败/超时/中断复位；specifier 请求改为进程级单例管理，新请求发出前先释放旧请求（防新旧请求争夺射频来回切换），cancelWifiRequest 幂等化（重复注销的 IllegalArgumentException 此前会沿调用链向上中断成功结果处理）
+- 修复：本应用破解成功的 WiFi 不出现在管理器已保存页——三处协同修复：① API29 通道成功路径被重复注销回调的异常中断，破解密码从未写入历史；② 历史进度更新（updateHistory）用 REPLACE 写入 password=null 覆盖已成功密码，重新破解同一 SSID 会清空旧密码，新增 upsertAttempt 进度型更新绝不触碰 successfulPassword；③ 已保存列表读取改为直读 StateFlow.value 并监听破解成功 SSID 集合变化自动重读（compose 状态首帧未传播首次发射时此前会漏掉破解记录）
+- 修复：已保存页「当前」高亮不实时——系统关闭 WiFi 重连后高亮不更新（currentInfo 仅进入页面时读取一次）。现管理器存活期间注册 WIFI_STATE_CHANGED / NETWORK_STATE_CHANGED 广播 + WiFi NetworkCallback 双通道实时监听（500ms 防抖），CurrentNetworkInfo 新增 netId 字段，高亮改为 SSID 或 networkId 双匹配（定位关闭时 netId 经特权通道解析，与定位开关无关）
+- 修复：已保存页点击「连接」无论成败总提示「√ 网络名」——连接命令发出即报成功。现完整连接生命周期：WiFi 关闭时先经通道开启并等待就绪（最多 10s，失败明确提示）；下发连接后轮询验证真实结果（应用层 WifiInfo 快速校验 + 特权通道 3s 节流解析，SSID/netId 双匹配，20s 超时）；约 7s 起用扫描结果预检——目标不在附近且尚未连上则明确报「未在附近扫描到，可能不在范围内」不必等满超时；连接中按钮显示进度并锁定，结果 Toast 如实区分已连接 / 无法开启 WiFi / 不在范围内 / 超时（密码已更改）/ 请求失败
+- 新增：已保存页筛选（全部 / 系统保存 / 破解记录）与排序（名称 A→Z / 名称 Z→A / 最近破解优先）——FilterChip + 排序菜单，选择跨页面切换保持
+- 新增：已保存页右侧 A-Z 字母索引栏（通讯录风格标配）——SSID 按拼音首字母分组（汉字经 TinyPinyin 转拼音，数字/符号归 # 组），字母分组吸顶标题（stickyHeader 含每组数量）；索引栏当前分组字母高亮放大、拖动滑动实时联动滚动、无条目字母淡显且拖动时就近落位、拖动时中央显示大字母气泡；「最近破解优先」排序为时间平铺列表时自动隐藏索引栏
+- 多语言：18 条新字符串 × 5 语言（简体中文 / English / 繁體中文 / 文言文 / en-rCN）；删除孤儿键 mgr_pwd_from_pojie（已由 mgr_cracked_mark 徽标替代）
+
 # v3.0.0_Alpha-22
 
 - 修复：主页网络状态卡缓存新增 WiFi 会话句柄检测——`Network.getNetworkHandle()` 每次连接重新分配且与定位开关无关，关闭 WiFi / 切换 WiFi / 断开重连 / 切换到移动网络时状态即时刷新；定位关闭期间切换 WiFi 不再显示旧网络名（此前最长需等待 60 秒过期刷新），新会话立即经特权通道解析

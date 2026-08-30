@@ -2,13 +2,19 @@
 
 package com.wifi.toolbox.utils
 
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.net.ConnectivityManager
 import android.net.LinkProperties
+import android.net.Network
 import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.net.wifi.WifiConfiguration
 import android.net.wifi.WifiManager
 import androidx.compose.runtime.*
+import com.wifi.toolbox.R
 import com.wifi.toolbox.ToolboxApp
 import com.wifi.toolbox.structs.GuardSettings
 import com.wifi.toolbox.structs.PojieSettings
@@ -43,13 +49,16 @@ data class SavedNetworkEntry(
     val password: String,               // 特权明文或破解成功密码；空 = 均不可得
     val passwordFromPojie: Boolean,     // 密码来源是否为本地破解记录
     val fromSystem: Boolean,            // 是否读到了系统保存的配置
-    val security: String = ""           // 加密类型摘要（OPEN/WPA2/WPA3/…）
+    val security: String = "",          // 加密类型摘要（OPEN/WPA2/WPA3/…）
+    val hasPojieRecord: Boolean = false,// 是否存在本应用破解成功记录（含已同时入系统配置的）
+    val pojieTime: Long = 0L            // 最近一次破解成功时间（「最近破解优先」排序用）
 )
 
 /** 当前连接网络详情（Tab3 展示模型，免定位字段优先） */
 data class CurrentNetworkInfo(
     val connected: Boolean,
     val ssid: String,                   // WifiIdentity 三级解析（定位无关兜底）
+    val netId: Int,                     // 当前连接的 networkId（定位关闭时经特权通道解析，不可得为 -1）
     val bssid: String,                  // 受定位开关限制，可能为空
     val rssi: Int,                      // dBm，免定位
     val linkSpeedMbps: Int,             // 协商速率，免定位
@@ -118,6 +127,7 @@ interface ManagerController {
     fun connectSaved(entry: SavedNetworkEntry)
     fun forgetSaved(entry: SavedNetworkEntry)
     fun deletePojieRecord(ssid: String)
+    val connectingSsid: String?         // 正在连接中的 SSID（按钮置 loading）
     val opMessage: String?              // 最近一次操作结果（连接/忘记）
     fun clearOpMessage()
 
@@ -127,6 +137,9 @@ interface ManagerController {
     val diagnosing: Boolean
     val diagnosisResults: List<com.wifi.toolbox.utils.ProbeResult>
     fun runDiagnosis()
+
+    /** 指定网络是否为当前连接（SSID 或 netId 双匹配，定位关闭时 netId 经特权解析） */
+    fun isCurrentNetwork(ssid: String, networkId: Int): Boolean
 }
 
 private const val SCAN_POLL_INTERVAL = 600L
@@ -152,13 +165,25 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
     var savedLoadingState by remember { mutableStateOf(false) }
     var savedSourceState by remember { mutableIntStateOf(0) }
     var opMessageState by remember { mutableStateOf<String?>(null) }
+    var connectingSsidState by remember { mutableStateOf<String?>(null) }
 
     // ---- Tab3 状态 ----
     var currentInfoState by remember {
-        mutableStateOf(CurrentNetworkInfo(false, "", "", 0, 0, 0, "", "", emptyList(), "", 0, false))
+        mutableStateOf(CurrentNetworkInfo(false, "", -1, "", 0, 0, 0, "", "", emptyList(), "", 0, false))
     }
     var diagnosingState by remember { mutableStateOf(false) }
     var diagnosisResultsState by remember { mutableStateOf<List<ProbeResult>>(emptyList()) }
+
+    // ---- 当前 WiFi 身份会话缓存（networkHandle 变化 = 新连接会话） ----
+    var identitySsidState by remember { mutableStateOf("") }
+    var identityNetIdState by remember { mutableIntStateOf(-1) }
+    var identityHandleState by remember { mutableLongStateOf(0L) }
+    var lastIdentityResolveAt by remember { mutableLongStateOf(0L) }
+    var identityJob by remember { mutableStateOf<Job?>(null) }
+    var retryReadJob by remember { mutableStateOf<Job?>(null) }
+    var liveRefreshJob by remember { mutableStateOf<Job?>(null) }
+
+    val badSsids = setOf("<unknown ssid>", "<none>", "unknown ssid", "0x")
 
     /** 候选通道序列：指定通道优先，其余可用通道按特权级别补位（0=未设置时自动选） */
     fun channelOrder(): List<Int> {
@@ -256,61 +281,71 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
     fun performSaved() {
         scope.launch {
             savedLoadingState = true
-            val configs = mutableListOf<WifiConfiguration>()
-            var src = 0
-            for (ch in channelOrder()) {
-                try {
-                    val r: List<WifiConfiguration> = when (ch) {
-                        1 -> ShizukuUtil.getSavedWifiList()
-                        2 -> AidlServiceHelper.getSavedWifiList(app)
-                        3 -> ApiUtil.getSavedWifiList(context)
-                        else -> emptyList()
+            try {
+                val configs = mutableListOf<WifiConfiguration>()
+                var src = 0
+                for (ch in channelOrder()) {
+                    try {
+                        val r: List<WifiConfiguration> = when (ch) {
+                            1 -> ShizukuUtil.getSavedWifiList()
+                            2 -> AidlServiceHelper.getSavedWifiList(app)
+                            3 -> ApiUtil.getSavedWifiList(context)
+                            else -> emptyList()
+                        }
+                        if (r.isNotEmpty()) {
+                            configs.addAll(r)
+                            src = ch
+                            break
+                        }
+                    } catch (_: Exception) {
                     }
-                    if (r.isNotEmpty()) {
-                        configs.addAll(r)
-                        src = ch
-                        break
-                    }
-                } catch (_: Exception) {
                 }
-            }
-            savedSourceState = src
-            savedCache = configs.toList()
+                savedSourceState = src
+                savedCache = configs.toList()
 
-            // 破解成功记录（本地库，无任何权限要求）
-            val cracked = historyList.filter { !it.password.isNullOrEmpty() }
-            val entries = mutableListOf<SavedNetworkEntry>()
-            configs.forEach { cfg ->
-                val ssid = cfg.SSID?.removeSurrounding("\"").orEmpty()
-                if (ssid.isEmpty()) return@forEach
-                val systemPwd = cfg.preSharedKey?.removeSurrounding("\"").orEmpty()
-                val hist = cracked.find { it.ssid == ssid }
-                val pwd = systemPwd.ifEmpty { hist?.password.orEmpty() }
-                entries.add(
-                    SavedNetworkEntry(
-                        ssid = ssid,
-                        networkId = cfg.networkId,
-                        password = pwd,
-                        passwordFromPojie = systemPwd.isEmpty() && hist != null,
-                        fromSystem = true
-                    )
-                )
-            }
-            cracked.forEach { h ->
-                if (entries.none { it.ssid == h.ssid }) {
+                // 破解成功记录（本地库，无任何权限要求）。
+                // 直读 StateFlow.value：compose 状态首帧可能尚未传播首次发射，
+                // 历史上导致破解记录偶发不显示。
+                val historyNow = app.pojieHistory.historyFlow.value
+                val cracked = historyNow.filter { !it.password.isNullOrEmpty() }
+                val entries = mutableListOf<SavedNetworkEntry>()
+                configs.forEach { cfg ->
+                    val ssid = cfg.SSID?.removeSurrounding("\"").orEmpty()
+                    if (ssid.isEmpty()) return@forEach
+                    val systemPwd = cfg.preSharedKey?.removeSurrounding("\"").orEmpty()
+                    val hist = cracked.find { it.ssid == ssid }
+                    val pwd = systemPwd.ifEmpty { hist?.password.orEmpty() }
                     entries.add(
                         SavedNetworkEntry(
-                            ssid = h.ssid,
-                            networkId = -1,
-                            password = h.password.orEmpty(),
-                            passwordFromPojie = true,
-                            fromSystem = false
+                            ssid = ssid,
+                            networkId = cfg.networkId,
+                            password = pwd,
+                            passwordFromPojie = systemPwd.isEmpty() && hist != null,
+                            fromSystem = true,
+                            hasPojieRecord = hist != null,
+                            pojieTime = hist?.lasttime ?: 0L
                         )
                     )
                 }
+                cracked.forEach { h ->
+                    if (entries.none { it.ssid == h.ssid }) {
+                        entries.add(
+                            SavedNetworkEntry(
+                                ssid = h.ssid,
+                                networkId = -1,
+                                password = h.password.orEmpty(),
+                                passwordFromPojie = true,
+                                fromSystem = false,
+                                hasPojieRecord = true,
+                                pojieTime = h.lasttime
+                            )
+                        )
+                    }
+                }
+                savedEntriesState = entries
+            } finally {
+                savedLoadingState = false
             }
-            savedEntriesState = entries
-            savedLoadingState = false
         }
     }
 
@@ -324,6 +359,46 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
         @Suppress("DEPRECATION")
         val dhcp = try { wm.dhcpInfo } catch (_: Exception) { null }
 
+        val connected = caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+        // networkHandle 每次连接重新分配（与定位开关无关）：句柄变化即新会话
+        val handle = try { wifiNetwork?.networkHandle ?: 0L } catch (_: Exception) { 0L }
+
+        // 应用层直读（定位可用时最快最准）
+        val quickSsid = try {
+            info?.ssid?.removeSurrounding("\"")?.takeIf { it.isNotEmpty() && it !in badSsids } ?: ""
+        } catch (_: Exception) { "" }
+        val quickNetId = try { info?.networkId ?: -1 } catch (_: Exception) { -1 }
+
+        if (!connected) {
+            identitySsidState = ""
+            identityNetIdState = -1
+            identityHandleState = 0L
+        } else if (handle != 0L && handle != identityHandleState) {
+            // 新 WiFi 会话：清旧身份，异步经特权通道解析（定位关闭时唯一途径）
+            identitySsidState = ""
+            identityNetIdState = -1
+            if (System.currentTimeMillis() - lastIdentityResolveAt > 3000) {
+                lastIdentityResolveAt = System.currentTimeMillis()
+                identityHandleState = handle
+                identityJob?.cancel()
+                identityJob = scope.launch {
+                    val (s, n) = WifiIdentity.resolve(context.applicationContext, app)
+                    if (identityHandleState == handle) {
+                        identitySsidState = s
+                        identityNetIdState = n
+                    }
+                }
+            } else {
+                // 节流期内的新会话：稍后自动重读一次，防止身份停留空值
+                retryReadJob?.cancel()
+                retryReadJob = scope.launch {
+                    delay(3200)
+                    readCurrent()
+                }
+            }
+        }
+
+        val cacheValid = connected && handle != 0L && handle == identityHandleState
         val ip = lp?.linkAddresses?.firstOrNull { it.address is java.net.Inet4Address }
             ?.address?.hostAddress ?: intToIp(dhcp?.ipAddress ?: 0)
         val gateway = lp?.routes?.firstNotNullOfOrNull { it.gateway?.hostAddress }
@@ -334,8 +409,9 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
         }).distinct()
 
         currentInfoState = CurrentNetworkInfo(
-            connected = caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true,
-            ssid = "",   // 异步解析填充（WifiIdentity 含特权兜底）
+            connected = connected,
+            ssid = quickSsid.ifEmpty { if (cacheValid) identitySsidState else "" },
+            netId = if (quickNetId >= 0) quickNetId else if (cacheValid) identityNetIdState else -1,
             bssid = try { info?.bssid.orEmpty() } catch (_: Exception) { "" },
             rssi = try { info?.rssi ?: -200 } catch (_: Exception) { -200 },
             linkSpeedMbps = try { info?.linkSpeed ?: -1 } catch (_: Exception) { -1 },
@@ -347,11 +423,55 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
             leaseDurationSec = dhcp?.leaseDuration ?: 0,
             validated = caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
         )
+    }
 
-        // SSID 三级解析（应用层→cmd→dumpsys，定位关闭也能拿到）
-        scope.launch {
-            val (ssid, _) = WifiIdentity.resolve(context.applicationContext, app)
-            currentInfoState = currentInfoState.copy(ssid = ssid)
+    /** 实时监听 WiFi 状态变化：广播 + NetworkCallback 双通道，防抖 500ms 后重读。
+     *
+     * 历史缺陷：currentInfo 仅在进入页面/手动刷新时读取——系统开关 WiFi 重连后
+     * 已保存页「当前」高亮不更新。 */
+    fun scheduleLiveRefresh() {
+        liveRefreshJob?.cancel()
+        liveRefreshJob = scope.launch {
+            delay(500)
+            readCurrent()
+        }
+    }
+
+    DisposableEffect(Unit) {
+        val intentFilter = IntentFilter().apply {
+            addAction(WifiManager.WIFI_STATE_CHANGED_ACTION)
+            addAction(WifiManager.NETWORK_STATE_CHANGED_ACTION)
+        }
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(c: Context?, i: Intent?) {
+                scheduleLiveRefresh()
+            }
+        }
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val networkCallback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                scheduleLiveRefresh()
+            }
+
+            override fun onLost(network: Network) {
+                scheduleLiveRefresh()
+            }
+        }
+        // targetSdk=28：系统广播注册无需 RECEIVER_EXPORTED/NOT_EXPORTED 标志
+        @Suppress("UnspecifiedRegisterReceiverFlag")
+        try {
+            context.registerReceiver(receiver, intentFilter)
+            cm.registerNetworkCallback(
+                NetworkRequest.Builder()
+                    .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+                    .build(),
+                networkCallback
+            )
+        } catch (_: Exception) {
+        }
+        onDispose {
+            try { context.unregisterReceiver(receiver) } catch (_: Exception) {}
+            try { cm.unregisterNetworkCallback(networkCallback) } catch (_: Exception) {}
         }
     }
 
@@ -359,11 +479,23 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
     LaunchedEffect(Unit) {
         readCurrent()
     }
-    // 破解历史变化时刷新合并标记与已保存列表
+    // 破解历史变化：刷新扫描列表合并标记；破解成功集合变化时重读已保存列表
+    // （直接监听 historyList 会因每次尝试都写进度而频繁触发特权读取，故仅
+    // 监听「破解成功 SSID 集合」的变化）
+    var lastCrackedKey by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(historyList) {
-        if (savedEntriesState.isNotEmpty() || scanNetworksState.isNotEmpty()) {
+        if (scanNetworksState.isNotEmpty()) {
             scanNetworksState = mergeMarks(scanNetworksState)
         }
+        val key = historyList
+            .filter { !it.password.isNullOrEmpty() }
+            .map { it.ssid }
+            .sorted()
+            .joinToString("|")
+        if (lastCrackedKey != null && key != lastCrackedKey) {
+            performSaved()
+        }
+        lastCrackedKey = key
     }
 
     return remember {
@@ -378,27 +510,162 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
             override val savedLoading get() = savedLoadingState
             override val savedSource get() = savedSourceState
             override fun refreshSaved() = performSaved()
+            override val connectingSsid get() = connectingSsidState
+
+            /**
+             * 连接已保存网络——完整生命周期：
+             * 1. WiFi 关闭时先开启并等待就绪（历史缺陷：直接下发连接命令，
+             *    命令静默失败却总提示「√」）；
+             * 2. 下发连接（系统配置 networkId 优先，仅破解记录时用密码新建配置）；
+             * 3. 轮询验证真实连接结果（SSID/netId 双匹配，定位关闭时经特权
+             *    通道解析；历史缺陷：请求发出即报成功）；
+             * 4. 范围外早失败：约 7s 后用扫描结果预检，目标不在附近且尚未连上
+             *    则明确报「不在范围内」，不必等满 20s；
+             * 5. 超时给出失败原因（不在范围内 / 密码已更改）。
+             */
             override fun connectSaved(entry: SavedNetworkEntry) {
+                if (connectingSsidState != null) return
                 scope.launch {
+                    connectingSsidState = entry.ssid
+                    opMessageState = context.getString(R.string.mgr_connecting, entry.ssid)
+                    var finalMsg: String? = null
                     try {
-                        val channel = channelOrder().first()
-                        when {
-                            entry.networkId >= 0 -> when (channel) {
-                                1 -> ShizukuUtil.enableNetwork(entry.networkId)
-                                2 -> AidlServiceHelper.enableNetwork(app, entry.networkId)
-                                else -> ApiUtil.enableNetwork(context, entry.networkId)
+                        // 1) WiFi 关闭 → 先开启并等待就绪
+                        if (!ApiUtil.isWifiEnabled(context)) {
+                            try {
+                                when (channelOrder().first()) {
+                                    1 -> ShizukuUtil.setWifiEnabled(true)
+                                    2 -> AidlServiceHelper.setWifiEnabled(app, true)
+                                    else -> ApiUtil.setWifiEnabled(context, true)
+                                }
+                            } catch (_: Exception) {
+                                try { ApiUtil.setWifiEnabled(context, true) } catch (_: Exception) {}
                             }
-                            entry.password.isNotEmpty() -> when (channel) {
-                                1 -> ShizukuUtil.connectToWifi(entry.ssid, entry.password)
-                                2 -> AidlServiceHelper.connectToWifi(app, entry.ssid, entry.password)
-                                else -> ApiUtil.connectToWifiApi28(context, entry.ssid, entry.password)
+                            var wifiOn = false
+                            var waited = 0
+                            while (waited < 10000) {
+                                if (ApiUtil.isWifiEnabled(context)) {
+                                    wifiOn = true; break
+                                }
+                                delay(400)
+                                waited += 400
                             }
+                            if (!wifiOn) {
+                                finalMsg = context.getString(R.string.mgr_connect_fail_wifi)
+                                return@launch
+                            }
+                            // WiFi 刚开启，系统需要时间初始化 WiFi 栈
+                            delay(1000)
                         }
-                        opMessageState = "✓ ${entry.ssid}"
-                    } catch (e: Exception) {
-                        opMessageState = "✗ ${e.message}"
+
+                        // 2) 下发连接请求
+                        try {
+                            val channel = channelOrder().first()
+                            when {
+                                entry.networkId >= 0 -> when (channel) {
+                                    1 -> ShizukuUtil.enableNetwork(entry.networkId)
+                                    2 -> AidlServiceHelper.enableNetwork(app, entry.networkId)
+                                    else -> ApiUtil.enableNetwork(context, entry.networkId)
+                                }
+
+                                entry.password.isNotEmpty() -> when (channel) {
+                                    1 -> ShizukuUtil.connectToWifi(entry.ssid, entry.password)
+                                    2 -> AidlServiceHelper.connectToWifi(app, entry.ssid, entry.password)
+                                    else -> ApiUtil.connectToWifiApi28(context, entry.ssid, entry.password)
+                                }
+
+                                else -> {
+                                    finalMsg = context.getString(R.string.mgr_connect_no_password)
+                                    return@launch
+                                }
+                            }
+                        } catch (e: Exception) {
+                            finalMsg = context.getString(R.string.mgr_connect_fail_request, e.message ?: "?")
+                            return@launch
+                        }
+
+                        // 3~5) 等待并验证真实连接结果
+                        finalMsg = awaitConnectionResult(entry)
+                    } finally {
+                        connectingSsidState = null
+                        if (finalMsg != null) opMessageState = finalMsg
+                        readCurrent()
+                        performSaved()
                     }
-                    readCurrent()
+                }
+            }
+
+            /** 轮询等待连接到目标网络；返回结果文案 */
+            private suspend fun awaitConnectionResult(entry: SavedNetworkEntry): String {
+                val timeoutMs = 20000L
+                val startAt = System.currentTimeMillis()
+                var scanTriggered = false
+                var rangeChecked = false
+                var lastPrivilegedAt = 0L
+                while (true) {
+                    if (!ApiUtil.isWifiEnabled(context)) {
+                        return context.getString(R.string.mgr_connect_fail_offline)
+                    }
+                    // 快速校验：应用层 WifiInfo（定位可用时 SSID/netId 均可靠）
+                    try {
+                        val wm = context.getSystemService(Context.WIFI_SERVICE) as WifiManager
+                        val info = wm.connectionInfo
+                        val s = info?.ssid?.removeSurrounding("\"")
+                            ?.takeIf { it.isNotEmpty() && it !in badSsids }
+                        if (s == entry.ssid) {
+                            return context.getString(R.string.mgr_connect_ok, entry.ssid)
+                        }
+                        val n = try { info?.networkId ?: -1 } catch (_: Exception) { -1 }
+                        if (n >= 0 && entry.networkId >= 0 && n == entry.networkId) {
+                            return context.getString(R.string.mgr_connect_ok, entry.ssid)
+                        }
+                    } catch (_: Exception) {
+                    }
+                    // 特权解析（定位关闭时唯一途径，3s 节流）
+                    if (System.currentTimeMillis() - lastPrivilegedAt > 3000) {
+                        lastPrivilegedAt = System.currentTimeMillis()
+                        try {
+                            val (s, n) = WifiIdentity.resolve(context.applicationContext, app)
+                            if (s == entry.ssid ||
+                                (n >= 0 && entry.networkId >= 0 && n == entry.networkId)
+                            ) {
+                                return context.getString(R.string.mgr_connect_ok, entry.ssid)
+                            }
+                        } catch (_: Exception) {
+                        }
+                    }
+                    val elapsed = System.currentTimeMillis() - startAt
+                    // 范围外预检：3s 触发一次扫描，7s 读结果——不在附近且未连上 → 早失败
+                    if (!scanTriggered && elapsed > 3000) {
+                        scanTriggered = true
+                        try {
+                            when (channelOrder().first()) {
+                                1 -> ShizukuUtil.startWifiScan(false)
+                                2 -> AidlServiceHelper.startWifiScan(app, false)
+                                else -> ApiUtil.startScan(context)
+                            }
+                        } catch (_: Exception) {
+                        }
+                    }
+                    if (!rangeChecked && elapsed > 7000) {
+                        rangeChecked = true
+                        try {
+                            val scans = when (channelOrder().first()) {
+                                1 -> ShizukuUtil.getWifiScanResults()
+                                2 -> AidlServiceHelper.getWifiScanResults(app)
+                                else -> if (ApiUtil.hasLocationPermission(context))
+                                    ApiUtil.getScanResults(context) else emptyList()
+                            }
+                            if (scans.isNotEmpty() && scans.none { it.ssid == entry.ssid }) {
+                                return context.getString(R.string.mgr_connect_fail_range, entry.ssid)
+                            }
+                        } catch (_: Exception) {
+                        }
+                    }
+                    if (elapsed >= timeoutMs) {
+                        return context.getString(R.string.mgr_connect_fail_timeout)
+                    }
+                    delay(800)
                 }
             }
             override fun forgetSaved(entry: SavedNetworkEntry) {
@@ -432,6 +699,12 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
             override fun refreshCurrent() = readCurrent()
             override val diagnosing get() = diagnosingState
             override val diagnosisResults get() = diagnosisResultsState
+            override fun isCurrentNetwork(ssid: String, networkId: Int): Boolean {
+                val info = currentInfoState
+                if (!info.connected) return false
+                if (info.ssid.isNotEmpty() && info.ssid == ssid) return true
+                return info.netId >= 0 && networkId >= 0 && info.netId == networkId
+            }
             override fun runDiagnosis() {
                 if (diagnosing) return
                 scope.launch {

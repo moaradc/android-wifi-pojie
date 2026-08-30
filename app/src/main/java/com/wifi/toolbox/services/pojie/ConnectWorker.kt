@@ -1,5 +1,6 @@
 package com.wifi.toolbox.services.pojie
 
+import android.content.Context
 import android.net.ConnectivityManager
 import android.os.Build
 import androidx.annotation.RequiresApi
@@ -20,6 +21,27 @@ import kotlin.coroutines.resumeWithException
 class ConnectWorker(
     private val service: PojieService
 ) {
+    companion object {
+        /**
+         * 当前存活的 API29 WifiNetworkSpecifier 请求（进程级单例）。
+         *
+         * specifier 连接由「已注册的回调」维持：成功后不注销才能保性连接不拆；
+         * 若放任多个请求共存，新旧两个 specifier 请求会争夺同一 WiFi 射频
+         * 造成来回切换。因此新请求发出前先注销旧请求，成功后由本字段持行
+         * （连接保持），直到进程退出或下一次破解请求替换。
+         */
+        @Volatile
+        var activeApi29Callback: ConnectivityManager.NetworkCallback? = null
+
+        /** 主动释放当前存活的 specifier 请求（断开其维持的连接） */
+        fun releaseActiveApi29Request(context: Context) {
+            activeApi29Callback?.let {
+                ApiUtil.cancelWifiRequest(context, it)
+            }
+            activeApi29Callback = null
+        }
+    }
+
     private var readLogMode = 0
     private var logcatService: WifiLogcatService? = null
     private var broadcastService: WifiBroadcastService? = null
@@ -106,6 +128,8 @@ class ConnectWorker(
             withTimeout(app.pojieConfig.maxTryTime.toLong()) {
                 if (connectMode == 4) {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        // 替换进程内旧的 specifier 请求：释放旧连接，防止新旧请求争夺射频
+                        releaseActiveApi29Request(service)
                         suspendCancellableCoroutine { continuation ->
                             launch(Dispatchers.Main) {
                                 try {
@@ -118,6 +142,8 @@ class ConnectWorker(
                                                 )
                                             }
                                         }
+                                    // 成功的连接必须靠已注册的回调维持，登记为进程级存活请求
+                                    ConnectWorker.activeApi29Callback = connectWifiApi29Callback
                                 } catch (e: Exception) {
                                     if (continuation.isActive) continuation.resumeWithException(e)
                                 }
@@ -131,6 +157,9 @@ class ConnectWorker(
                                     )
                                 }
                                 connectWifiApi29Callback = null
+                                if (ConnectWorker.activeApi29Callback != null) {
+                                    ConnectWorker.activeApi29Callback = null
+                                }
                             }
                         }
                     } else throw Exception(service.getString(R.string.device_too_old))
@@ -221,12 +250,22 @@ class ConnectWorker(
 
     fun cleanConnection(settings: PojieSettings) {
         if (connectWifiApi29Callback != null) {
-            ApiUtil.cancelWifiRequest(service, connectWifiApi29Callback!!)
+            // 失败/取消路径：注销请求（若 onUnavailable 已自注销，内部幂等吞掉）
+            try {
+                ApiUtil.cancelWifiRequest(service, connectWifiApi29Callback!!)
+            } catch (_: Exception) {
+            }
             connectWifiApi29Callback = null
+            if (ConnectWorker.activeApi29Callback != null) {
+                ConnectWorker.activeApi29Callback = null
+            }
         } else {
-            when (settings.enableMode) {
-                1 -> ShizukuUtil.disconnectWifi()
-                2 -> ApiUtil.disconnectWifi(service)
+            try {
+                when (settings.enableMode) {
+                    1 -> ShizukuUtil.disconnectWifi()
+                    2 -> ApiUtil.disconnectWifi(service)
+                }
+            } catch (_: Exception) {
             }
         }
     }

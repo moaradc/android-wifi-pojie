@@ -60,10 +60,15 @@ object ApiUtil {
                 .setNetworkSpecifier(builder.build())
                 .build()
 
+            // 【生命周期关键】WifiNetworkSpecifier 的连接随请求存活：
+            // onAvailable 时绝不能注销回调——注销即释放请求来源的网络（官方文档：
+            // unregisterNetworkCallback "possibly releases networks originating
+            // from a request"），会导致连接成功后立即断开。
+            // 连接保持：成功后由调用方持有回调；失败(onUnavailable)时请求已死，
+            // 注销仅为清理，无网络可释放，安全。
             val callback = object : ConnectivityManager.NetworkCallback() {
                 override fun onAvailable(network: Network) {
                     onStatus(true)
-                    clearCallback()
                 }
 
                 override fun onUnavailable() {
@@ -90,8 +95,12 @@ object ApiUtil {
     fun cancelWifiRequest(context: Context, callback: ConnectivityManager.NetworkCallback) {
         val connectivityManager =
             context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        callback.let {
-            connectivityManager.unregisterNetworkCallback(it)
+        // 幂等：onUnavailable 已自注销的回调再次注销会抛 IllegalArgumentException，
+        // 此处必须吞掉——否则异常会沿 cleanConnection → handleAttemptResult 向上中断
+        // 成功结果处理链（历史上导致破解成功却不写历史/不停任务）。
+        try {
+            connectivityManager.unregisterNetworkCallback(callback)
+        } catch (_: Exception) {
         }
     }
 
