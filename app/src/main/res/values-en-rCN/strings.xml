@@ -122,6 +122,9 @@
 
     <!-- ==================== 网络守护 ==================== -->
     <string name="guard_name">Network Guard</string>
+    <string name="guard_notif_action_start">Start</string>
+    <string name="guard_notif_action_stop">Stop</string>
+    <string name="guard_notif_action_exit">Exit</string>
     <string name="guard_tab_status">Status</string>
     <string name="guard_tab_stats">Stats</string>
     <string name="guard_service_running">Guard running</string>
@@ -145,15 +148,15 @@
     <string name="guard_notif_heal_fail_title">Reconnect failed</string>
     <string name="guard_notif_heal_fail_text">%1$s still offline after reconnect; will retry with backoff</string>
     <string name="guard_cat_probe">Detection methods</string>
-    <string name="guard_probe_tip">Connected ≠ online. Combine probes; any pass = online. HTTP 204 recommended. ICMP needs Shizuku/Root.</string>
+    <string name="guard_probe_tip">Connected ≠ online; any passing probe means online. Keep HTTP 204 enabled</string>
     <string name="guard_probe_http">HTTP 204 probe</string>
-    <string name="guard_probe_http_tip">AOSP standard probe (bound to WiFi network), dual endpoints, recommended</string>
+    <string name="guard_probe_http_tip">AOSP standard probe, dual endpoints, recommended</string>
     <string name="guard_probe_dns">DNS probe</string>
-    <string name="guard_probe_dns_tip">Detects DNS hijack/blackhole: useful when 204 passes but DNS fails</string>
+    <string name="guard_probe_dns_tip">Catches DNS hijack/black hole (204 OK but resolution fails)</string>
     <string name="guard_probe_icmp">ICMP ping probe</string>
-    <string name="guard_probe_icmp_tip">Runs ping via privileged shell bound to the Wi-Fi interface source IP (unprivileged bind, prevents cellular fallback) against public DNS anycast IPs; needs Shizuku/Root</string>
+    <string name="guard_probe_icmp_tip">Runs ping bound to WiFi source IP; needs Shizuku/Root</string>
     <string name="guard_probe_validated">System VALIDATED bit</string>
-    <string name="guard_probe_validated_tip">Reads the system\'s latest validation verdict; zero cost but not real-time</string>
+    <string name="guard_probe_validated_tip">Reads the system\'s last validation verdict; free but not real-time</string>
     <string name="guard_probe_timeout">Probe timeout</string>
     <string name="guard_ms_value">%1$dms</string>
     <string name="guard_fail_threshold">Debounce threshold</string>
@@ -167,9 +170,9 @@
     <string name="guard_interval_custom_input">Seconds (5-3600)</string>
     <string name="guard_interval_custom_range">Range 5-3600s; shorter drains battery faster</string>
     <string name="guard_check_on_change">Check on network change</string>
-    <string name="guard_check_on_change_tip">Probe immediately when WiFi reconnects/switches, no waiting</string>
+    <string name="guard_check_on_change_tip">Probe immediately on WiFi reconnect/switch</string>
     <string name="guard_only_wifi">Only guard on WiFi</string>
-    <string name="guard_only_wifi_tip">Skip probing and stats when not on WiFi</string>
+    <string name="guard_only_wifi_tip">Skips probing and stats on mobile data</string>
     <string name="guard_cat_heal">Auto reconnect</string>
     <string name="guard_heal_strategy">Heal strategy</string>
     <string name="guard_strategy_0">Detect only, no reconnect</string>
@@ -177,7 +180,7 @@
     <string name="guard_strategy_2">Standard: disconnect+reconnect (recommended)</string>
     <string name="guard_strategy_3">Powerful: escalating steps</string>
     <string name="guard_strategy_4">Ultimate: escalating + targeted connect</string>
-    <string name="guard_strategy_tip">Different devices fail differently: fake-connect → Standard; sleep/power issues → Powerful. Escalation stops as soon as the network recovers.</string>
+    <string name="guard_strategy_tip">Standard for fake connections, strong for sleep faults; escalation stops on recovery</string>
     <string name="guard_heal_verify_timeout">Verify timeout after reconnect</string>
     <string name="guard_sec_value">%1$ds</string>
     <string name="guard_cooldown_base">Backoff base</string>
@@ -187,22 +190,22 @@
     <string name="guard_channel_aidl">Root AIDL</string>
     <string name="guard_channel_api">System API (no root)</string>
     <string name="guard_skip_link_down">Skip when WiFi link down</string>
-    <string name="guard_skip_link_down_tip">Link already down may be user-initiated or router off; skip reconnect</string>
+    <string name="guard_skip_link_down_tip">Skips healing when link is down (manual disconnect or router off)</string>
     <string name="guard_skip_portal">Skip on captive portal</string>
-    <string name="guard_skip_portal_tip">Reconnecting cannot fix portal authentication; skip</string>
+    <string name="guard_skip_portal_tip">Skips healing when a captive portal is detected</string>
     <string name="guard_cat_notify">Notifications</string>
     <string name="guard_notify_heal">Notify on healed</string>
     <string name="guard_notify_heal_tip">System notification after successful auto-reconnect</string>
     <string name="guard_notify_fail">Notify on failure</string>
     <string name="guard_notify_fail_tip">System notification when still offline after reconnect</string>
     <string name="guard_notify_persistent">Persistent guard notification</string>
-    <string name="guard_notify_persistent_tip">When on, the notification stays visible whether or not the guard is running (shows "stopped" when idle, tap to open); when off, only shown while the guard runs (foreground-service requirement)</string>
+    <string name="guard_notify_persistent_tip">Always keeps the notification ("Not running" with quick start when stopped); off = only while running</string>
     <string name="guard_stat_checks">Total checks</string>
     <string name="guard_stat_failures">Offline verdicts</string>
     <string name="guard_stat_heals">Reconnects</string>
     <string name="guard_stat_recovered">Recovered</string>
     <string name="guard_stat_action_rate">Action success rate</string>
-    <string name="guard_stat_action_tip">High-rate action reveals your root cause: reassociate works = link stall; wifi cycle works = driver/power-saving issue</string>
+    <string name="guard_stat_action_tip">Effective action reveals the fault: reassociate = link stall; wifi cycle = driver sleep</string>
     <string name="guard_stat_events">Event history</string>
     <string name="guard_stat_reset">Reset</string>
     <string name="guard_log_started">Guard started, checking every %1$ds</string>
@@ -249,11 +252,11 @@
     <string name="guard_max_attempts">Retry attempt limit</string>
     <string name="guard_max_attempts_unlimited">Unlimited (keep retrying with backoff)</string>
     <string name="guard_max_attempts_value">Up to %1$d attempts</string>
-    <string name="guard_max_attempts_tip">Circuit-breaker style: after N consecutive failed heals, healing stops (checks continue) and auto-resumes when online or on manual check. Unlimited mode keeps retrying even if the router is powered off — a limit is recommended.</string>
+    <string name="guard_max_attempts_tip">Pauses healing after consecutive failures (checks continue), auto-resumes on recovery or manual check; unlimited may spin while router is off</string>
     <string name="guard_strategy_5">Custom: pick actions</string>
     <string name="guard_strategy_6">Best success: %1$s</string>
-    <string name="guard_strategy_best_tip">Best action right now: %1$s (dynamically picked by cumulative heal success)</string>
-    <string name="guard_custom_actions_tip">Pick the healing actions to run, in light-to-heavy order; it stops as soon as the probe recovers. Defaults to Standard when nothing is selected.</string>
+    <string name="guard_strategy_best_tip">Current best action: %1$s (picked by history success count)</string>
+    <string name="guard_custom_actions_tip">Runs light to heavy, stops on recovery; defaults to Standard if none</string>
     <string name="guard_action_reassociate">Reassociate</string>
     <string name="guard_action_reassociate_tip">802.11 reassociation without leaving the link, fastest (1-3s)</string>
     <string name="guard_action_reconnect">Full reconnect</string>
@@ -271,7 +274,7 @@
     <string name="guard_level_error">Error</string>
     <string name="guard_level_heal">Healing</string>
     <string name="guard_log_type">Log types to record</string>
-    <string name="guard_log_type_tip">Choose which log types are recorded (all by default); probing and healing are unaffected</string>
+    <string name="guard_log_type_tip">Choose log types written to live log (all by default)</string>
     <string name="guard_log_type_none">None</string>
     <string name="guard_cat_log">Logging</string>
     <string name="guard_log_dir">Log save location</string>
@@ -280,15 +283,15 @@
     <string name="guard_log_dir_invalid">Custom folder unavailable, saving falls back to the app-private directory</string>
     <string name="guard_log_dir_use_private">Default (app-private directory)</string>
     <string name="guard_log_dir_pick">Pick a folder… (system file manager)</string>
-    <string name="guard_log_dir_tip">Logs are saved to the app-private log directory by default (no permission needed, removed on uninstall); picking a folder saves via the system file manager and survives uninstall.</string>
+    <string name="guard_log_dir_tip">Private log dir by default (no permission, cleared on uninstall); custom-folder logs survive uninstall</string>
     <string name="guard_log_src_app">App dir</string>
     <string name="guard_log_src_saf">Custom dir</string>
     <string name="guard_channel_current_title">Current channels (tap to collapse)</string>
     <string name="guard_channel_probe">Probe</string>
     <string name="guard_channel_heal">Heal</string>
     <string name="guard_channel_copied">Channel info copied</string>
-    <string name="guard_notif_stopped">Guard stopped — tap to open and enable</string>
-    <string name="guard_channel_tip">Privileged channels are used for healing actions and ICMP ping probes (Auto = Shizuku → Root → local shell fallback; an unavailable selected channel falls back to local execution and is shown as such). HTTP 204 / DNS / system-capability probes run on the app layer and need no privilege.</string>
+    <string name="guard_notif_stopped">Guard not running — tap to start</string>
+    <string name="guard_channel_tip">Only healing and ICMP probe use privileged channels (auto=Shizuku→Root→local); HTTP/DNS/capability need none</string>
     <string name="guard_probe_copied">Probe result copied</string>
     <string name="guard_events_file_header">WiFi Toolbox — Network Guard event history</string>
     <string name="guard_events_copied">Copied %1$d events</string>

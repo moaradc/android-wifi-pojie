@@ -417,6 +417,20 @@ class GuardService : Service() {
         val pendingIntent = PendingIntent.getActivity(
             this, 0, intent, PendingIntent.FLAG_IMMUTABLE
         )
+        // 「关闭守护」：普通 getService 即可（服务已在运行，无需前台化义务；
+        // 若用 getForegroundService 会因 ACTION_STOP 提前 return 不调 startForeground 而超时崩溃）
+        val stopIntent = PendingIntent.getService(
+            this, 10,
+            Intent(this, GuardService::class.java).apply { action = ACTION_STOP },
+            PendingIntent.FLAG_IMMUTABLE
+        )
+        // 「结束」：广播接收器直接杀进程（通知操作按钮 PendingIntent 在
+        // 临时白名单内，允许后台启动组件；杀进程本身无需前台服务）
+        val killIntent = PendingIntent.getBroadcast(
+            this, 11,
+            Intent(this, KillAppReceiver::class.java),
+            PendingIntent.FLAG_IMMUTABLE
+        )
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(getString(R.string.guard_name))
             .setContentText(text ?: getString(R.string.guard_notif_monitoring))
@@ -425,6 +439,16 @@ class GuardService : Service() {
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_MIN)
             .setSilent(silent)
+            .addAction(
+                android.R.drawable.ic_media_pause,
+                getString(R.string.guard_notif_action_stop),
+                stopIntent
+            )
+            .addAction(
+                android.R.drawable.ic_lock_power_off,
+                getString(R.string.guard_notif_action_exit),
+                killIntent
+            )
             .build()
     }
 
@@ -506,6 +530,19 @@ class GuardService : Service() {
             val pendingIntent = PendingIntent.getActivity(
                 context, 0, intent, PendingIntent.FLAG_IMMUTABLE
             )
+            // 「开启守护」：服务未运行，须用 getForegroundService（守护服务
+            // 启动后 5s 内会 startForeground，满足前台服务义务；通知操作按钮
+            // 属用户交互，豁免后台启动前台服务限制）
+            val startIntent = PendingIntent.getForegroundService(
+                context, 20,
+                Intent(context, GuardService::class.java),
+                PendingIntent.FLAG_IMMUTABLE
+            )
+            val killIntent = PendingIntent.getBroadcast(
+                context, 21,
+                Intent(context, KillAppReceiver::class.java),
+                PendingIntent.FLAG_IMMUTABLE
+            )
             return NotificationCompat.Builder(context, CHANNEL_ID)
                 .setContentTitle(context.getString(R.string.guard_name))
                 .setContentText(context.getString(R.string.guard_notif_stopped))
@@ -514,6 +551,16 @@ class GuardService : Service() {
                 .setOngoing(true)
                 .setPriority(NotificationCompat.PRIORITY_MIN)
                 .setSilent(true)
+                .addAction(
+                    android.R.drawable.ic_media_play,
+                    context.getString(R.string.guard_notif_action_start),
+                    startIntent
+                )
+                .addAction(
+                    android.R.drawable.ic_lock_power_off,
+                    context.getString(R.string.guard_notif_action_exit),
+                    killIntent
+                )
                 .build()
         }
 

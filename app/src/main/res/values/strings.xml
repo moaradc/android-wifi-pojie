@@ -123,6 +123,9 @@
 
     <!-- ==================== 网络守护 ==================== -->
     <string name="guard_name">网络守护</string>
+    <string name="guard_notif_action_start">开启</string>
+    <string name="guard_notif_action_stop">关闭</string>
+    <string name="guard_notif_action_exit">结束</string>
     <string name="guard_tab_status">状态</string>
     <string name="guard_tab_stats">统计</string>
     <string name="guard_service_running">守护运行中</string>
@@ -147,15 +150,15 @@
     <string name="guard_notif_heal_fail_text">%1$s 重连后仍无法上网，将按退避策略继续尝试</string>
 
     <string name="guard_cat_probe">检测方式</string>
-    <string name="guard_probe_tip">已连接不等于能上网。可组合多种探测方式，任一通过即判在线；建议至少启用HTTP 204。ICMP探测需要Shizuku或Root通道。</string>
+    <string name="guard_probe_tip">已连接不等于能上网；任一探测通过即判在线，建议至少启用 HTTP 204</string>
     <string name="guard_probe_http">HTTP 204 探测</string>
-    <string name="guard_probe_http_tip">AOSP 标准探测（绑定WiFi网络防误判），双端点互备，最推荐</string>
+    <string name="guard_probe_http_tip">AOSP 标准探测，双端点互备，最推荐</string>
     <string name="guard_probe_dns">DNS 解析探测</string>
-    <string name="guard_probe_dns_tip">检测DNS劫持/黑洞：204通但域名解析失败时有效</string>
+    <string name="guard_probe_dns_tip">揪出 DNS 劫持/黑洞（204 通但解析失败时有效）</string>
     <string name="guard_probe_icmp">ICMP ping 探测</string>
-    <string name="guard_probe_icmp_tip">特权shell执行ping，自动绑定WiFi接口源IP（免特权绑定防回落蜂窝），目标为公共DNS任播IP，需Shizuku/Root</string>
+    <string name="guard_probe_icmp_tip">shell 执行 ping 并绑定 WiFi 源 IP，需 Shizuku/Root</string>
     <string name="guard_probe_validated">系统能力位（VALIDATED）</string>
-    <string name="guard_probe_validated_tip">读取系统最近一次网络验证结论，零开销但非实时</string>
+    <string name="guard_probe_validated_tip">读系统最近一次验证结论，零开销但非实时</string>
     <string name="guard_probe_timeout">单次探测超时</string>
     <string name="guard_ms_value">%1$dms</string>
     <string name="guard_fail_threshold">防抖阈值</string>
@@ -170,9 +173,9 @@
     <string name="guard_interval_custom_input">秒数（5-3600）</string>
     <string name="guard_interval_custom_range">范围 5~3600 秒，过短会增加耗电</string>
     <string name="guard_check_on_change">网络变化立即检测</string>
-    <string name="guard_check_on_change_tip">WiFi重连/切换时立即触发一次检测，免等待定时</string>
+    <string name="guard_check_on_change_tip">WiFi 重连/切换时立即检测一次，免等定时</string>
     <string name="guard_only_wifi">仅在 WiFi 连接时守护</string>
-    <string name="guard_only_wifi_tip">未连接WiFi时不探测不统计（用流量时不打扰）</string>
+    <string name="guard_only_wifi_tip">用流量时不探测不统计</string>
 
     <string name="guard_cat_heal">自动重连</string>
     <string name="guard_heal_strategy">自愈策略档位</string>
@@ -181,7 +184,7 @@
     <string name="guard_strategy_2">标准档：断开重连（推荐）</string>
     <string name="guard_strategy_3">强力档：逐级升压</string>
     <string name="guard_strategy_4">终极档：升压+定向重连</string>
-    <string name="guard_strategy_tip">不同设备故障不同：假连接选标准档；省电休眠类故障选强力档。升压策略每步探测恢复即停，不浪费重动作。</string>
+    <string name="guard_strategy_tip">假连接选标准档，休眠类故障选强力档；升压每步验证，恢复即停</string>
     <string name="guard_heal_verify_timeout">重连后验证超时</string>
     <string name="guard_sec_value">%1$ds</string>
     <string name="guard_cooldown_base">退避基数</string>
@@ -191,9 +194,9 @@
     <string name="guard_channel_aidl">Root AIDL</string>
     <string name="guard_channel_api">系统 API（免Root）</string>
     <string name="guard_skip_link_down">WiFi断开时不自愈</string>
-    <string name="guard_skip_link_down_tip">链路层已断开可能是用户主动断开或路由器关机，跳过重连</string>
+    <string name="guard_skip_link_down_tip">主动断开或路由器关机时跳过重连</string>
     <string name="guard_skip_portal">认证页面时跳过自愈</string>
-    <string name="guard_skip_portal_tip">检测到Captive Portal（公共WiFi认证页）时重连无意义，跳过</string>
+    <string name="guard_skip_portal_tip">检测到认证页时重连无意义，跳过</string>
 
     <string name="guard_cat_notify">通知</string>
     <string name="guard_notify_heal">重连成功通知</string>
@@ -201,14 +204,14 @@
     <string name="guard_notify_fail">重连失败通知</string>
     <string name="guard_notify_fail_tip">重连后仍不通时发系统通知</string>
     <string name="guard_notify_persistent">常驻守护通知</string>
-    <string name="guard_notify_persistent_tip">开启后无论守护是否运行都常驻显示通知（守护停止时显示“未运行”可点击进入）；关闭时仅守护运行中显示前台通知（系统前台服务要求）</string>
+    <string name="guard_notify_persistent_tip">开启后始终常驻通知（停止时显示“未运行”可快捷开启）；关闭则仅运行中显示</string>
 
     <string name="guard_stat_checks">总检测</string>
     <string name="guard_stat_failures">断网判定</string>
     <string name="guard_stat_heals">重连次数</string>
     <string name="guard_stat_recovered">恢复成功</string>
     <string name="guard_stat_action_rate">自愈动作有效率</string>
-    <string name="guard_stat_action_tip">哪个动作成功率高就说明你的设备是什么故障：重协商有效=链路假死；总开关有效=驱动/省电休眠</string>
+    <string name="guard_stat_action_tip">有效动作即故障诊断：重协商有效=链路假死；总开关有效=驱动休眠</string>
     <string name="guard_stat_events">事件历史</string>
     <string name="guard_stat_reset">清零</string>
 
@@ -256,11 +259,11 @@
     <string name="guard_max_attempts">退避次数限制</string>
     <string name="guard_max_attempts_unlimited">无限制（一直退避重试）</string>
     <string name="guard_max_attempts_value">最多 %1$d 次</string>
-    <string name="guard_max_attempts_tip">参考熔断器模式：连续自愈失败达到上限后停止自愈动作（检测继续），网络恢复或手动“立即检测”时自动恢复。无限制模式在路由器断电时会持续空转，建议设置上限。</string>
+    <string name="guard_max_attempts_tip">连续失败达上限后暂停自愈（检测继续），网络恢复或手动检测后自动恢复；无限制会在路由器断电时空转</string>
     <string name="guard_strategy_5">自定义档：自选动作</string>
     <string name="guard_strategy_6">高成功率档：%1$s</string>
-    <string name="guard_strategy_best_tip">高成功率档当前优选动作：%1$s（按历史累计自愈成功次数动态选取）</string>
-    <string name="guard_custom_actions_tip">勾选要执行的自愈动作，按由轻到重顺序执行，任一动作后探测恢复即停止。未勾选时按标准档执行。</string>
+    <string name="guard_strategy_best_tip">当前优选动作：%1$s（按历史成功次数动态选取）</string>
+    <string name="guard_custom_actions_tip">由轻到重执行，任一动作后恢复即停；未勾选时按标准档</string>
     <string name="guard_action_reassociate">重协商（reassociate）</string>
     <string name="guard_action_reassociate_tip">802.11 链路重协商，不断链，速度最快（1-3s）</string>
     <string name="guard_action_reconnect">完整重连（reconnect）</string>
@@ -278,7 +281,7 @@
     <string name="guard_level_error">错误</string>
     <string name="guard_level_heal">自愈</string>
     <string name="guard_log_type">记录日志类型</string>
-    <string name="guard_log_type_tip">选择写入实时日志的类型（默认全部），不影响检测与自愈本身</string>
+    <string name="guard_log_type_tip">选择写入实时日志的类型（默认全部）</string>
     <string name="guard_log_type_none">不记录</string>
     <string name="guard_cat_log">日志</string>
     <string name="guard_log_dir">日志保存位置</string>
@@ -287,15 +290,15 @@
     <string name="guard_log_dir_invalid">自选文件夹已失效，保存时将回退应用私有目录</string>
     <string name="guard_log_dir_use_private">默认（应用私有目录）</string>
     <string name="guard_log_dir_pick">选择文件夹…（系统文件管理器）</string>
-    <string name="guard_log_dir_tip">默认保存到应用私有 log 目录（免权限，卸载即清）；选择文件夹后通过系统文件管理器保存，卸载应用不影响已保存文件。</string>
+    <string name="guard_log_dir_tip">默认存应用私有 log 目录（免权限，卸载即清）；自选文件夹的日志卸载后保留</string>
     <string name="guard_log_src_app">应用目录</string>
     <string name="guard_log_src_saf">自选目录</string>
     <string name="guard_channel_current_title">当前通道（点击收起）</string>
     <string name="guard_channel_probe">探测</string>
     <string name="guard_channel_heal">自愈</string>
     <string name="guard_channel_copied">已复制通道信息</string>
-    <string name="guard_notif_stopped">守护未运行，点击开启网络守护</string>
-    <string name="guard_channel_tip">特权通道用于自愈动作与 ICMP ping 探测（自动=Shizuku→Root→本地逐级回退，指定通道不可用时降级本地执行并如实显示）；HTTP 204 / DNS / 系统能力位探测走应用层，无需特权。</string>
+    <string name="guard_notif_stopped">守护未运行，点通知或「开启」启动</string>
+    <string name="guard_channel_tip">仅自愈与 ICMP 探测用特权通道（自动=Shizuku→Root→本地回退）；HTTP/DNS/能力位走应用层无需特权</string>
     <string name="guard_probe_copied">已复制探测结果</string>
     <string name="guard_events_file_header">WiFi工具箱 网络守护事件历史</string>
     <string name="guard_events_copied">已复制 %1$d 条事件</string>
