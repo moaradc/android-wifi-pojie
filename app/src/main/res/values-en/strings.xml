@@ -124,6 +124,18 @@
     <string name="guard_notif_action_start">Start</string>
     <string name="guard_notif_action_stop">Stop</string>
     <string name="guard_notif_action_exit">Exit</string>
+    <string name="guard_cat_keepalive">Background keep-alive</string>
+    <string name="guard_keepalive_tip">Three levels: system (wake lock + battery-exemption) keeps checks running with screen off; Shizuku/Root one-tap commands add Doze whitelist and allow background running (strongest fix for OEM app killing; re-run once after reboot)</string>
+    <string name="guard_keepalive_wakelock">Keep checking with screen off (wake lock)</string>
+    <string name="guard_keepalive_wakelock_tip">Holds a CPU wake lock so checks continue with screen off (slight battery cost)</string>
+    <string name="guard_keepalive_battery">Battery optimization exemption</string>
+    <string name="guard_keepalive_battery_on">Exempted ✓ (system dialog to change)</string>
+    <string name="guard_keepalive_battery_off">Not exempted — tap to request (doze freezes background)</string>
+    <string name="guard_keepalive_shizuku">Shizuku keep-alive</string>
+    <string name="guard_keepalive_root">Root keep-alive</string>
+    <string name="guard_keepalive_running">Running…</string>
+    <string name="guard_keepalive_granted">Shizuku granted — tap again to execute</string>
+    <string name="guard_keepalive_root_unavailable">Root service not connected, starting authorization…</string>
     <string name="guard_tab_status">Status</string>
     <string name="guard_tab_stats">Stats</string>
     <string name="guard_service_running">Guard running</string>
@@ -273,7 +285,7 @@
     <string name="guard_level_error">Error</string>
     <string name="guard_level_heal">Healing</string>
     <string name="guard_log_type">Log types to record</string>
-    <string name="guard_log_type_tip">Choose log types written to live log (all by default)</string>
+    <string name="guard_log_type_tip">Which levels get written to the live log (memory and saved files); independent of the on-screen filter</string>
     <string name="guard_log_type_none">None</string>
     <string name="guard_cat_log">Logging</string>
     <string name="guard_log_dir">Log save location</string>

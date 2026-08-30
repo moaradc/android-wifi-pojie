@@ -124,6 +124,18 @@
     <string name="guard_notif_action_start">開啟</string>
     <string name="guard_notif_action_stop">關閉</string>
     <string name="guard_notif_action_exit">結束</string>
+    <string name="guard_cat_keepalive">後臺保活</string>
+    <string name="guard_keepalive_tip">三級保活：系統級（喚醒鎖+電池優化白名單）保息屏後檢測不輟；Shizuku/Root 一鍵命令入 Doze 白名單並縱後臺運行（國產 ROM 後臺查殺之上解，重啟後須再行一次）</string>
+    <string name="guard_keepalive_wakelock">息屏恆檢（喚醒鎖）</string>
+    <string name="guard_keepalive_wakelock_tip">持 CPU 喚醒鎖，息屏後檢測如常（微耗電，可關）</string>
+    <string name="guard_keepalive_battery">電池優化白名單</string>
+    <string name="guard_keepalive_battery_on">已豁免 ✓（系統彈窗可改）</string>
+    <string name="guard_keepalive_battery_off">未豁免——點之申請（息屏省電凍結後臺）</string>
+    <string name="guard_keepalive_shizuku">Shizuku 一鍵保活</string>
+    <string name="guard_keepalive_root">Root 一鍵保活</string>
+    <string name="guard_keepalive_running">執行中…</string>
+    <string name="guard_keepalive_granted">Shizuku 已授權，請再點執行</string>
+    <string name="guard_keepalive_root_unavailable">Root 服務未連，正拉起授權…</string>
     <string name="guard_tab_status">狀態</string>
     <string name="guard_tab_stats">統計</string>
     <string name="guard_service_running">守護執行中</string>
@@ -273,7 +285,7 @@
     <string name="guard_level_error">錯誤</string>
     <string name="guard_level_heal">自癒</string>
     <string name="guard_log_type">記錄日誌類型</string>
-    <string name="guard_log_type_tip">擇寫入即時日誌之類型（預設全部）</string>
+    <string name="guard_log_type_tip">定何級寫入即時日誌（記憶與存檔）；與狀態頁之顯示篩選互不相涉</string>
     <string name="guard_log_type_none">不記錄</string>
     <string name="guard_cat_log">日誌</string>
     <string name="guard_log_dir">日誌儲存位置</string>

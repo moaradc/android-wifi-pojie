@@ -48,6 +48,7 @@ import com.wifi.toolbox.ui.items.checkShizukuUI
 import com.wifi.toolbox.utils.GuardEvent
 import com.wifi.toolbox.utils.GuardLogStore
 import com.wifi.toolbox.utils.GuardStats
+import com.wifi.toolbox.utils.KeepAliveHelper
 import com.wifi.toolbox.utils.ProbeResult
 import com.wifi.toolbox.utils.StoredLogFile
 import com.wifi.toolbox.utils.WifiHealer
@@ -59,6 +60,8 @@ import java.util.Date
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * 网络守护入口页：WiFi 断网自动检测与重连
@@ -1308,6 +1311,69 @@ private fun GuardSettingsPage(settings: MutableState<GuardSettings>, app: Toolbo
                 )
             }
 
+            // ---- 后台保活 ----
+            item { PreferenceCategory(title = { Text(stringResource(R.string.guard_cat_keepalive)) }) }
+            item {
+                BannerTip(
+                    text = stringResource(R.string.guard_keepalive_tip),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                )
+            }
+            item {
+                SwitchPreference(
+                    value = s.keepAliveWakeLock,
+                    onValueChange = {
+                        settings.value = s.copy(keepAliveWakeLock = it)
+                        // 服务运行中：热加载即时生效；未运行：下次启动生效
+                        if (GuardState.running) {
+                            try {
+                                context.startService(
+                                    Intent(context, GuardService::class.java).apply {
+                                        action = GuardService.ACTION_RELOAD
+                                    }
+                                )
+                            } catch (_: Exception) {
+                            }
+                        }
+                    },
+                    title = { Text(stringResource(R.string.guard_keepalive_wakelock)) },
+                    summary = { Text(stringResource(R.string.guard_keepalive_wakelock_tip)) },
+                    icon = { Icon(Icons.Filled.Bolt, null) }
+                )
+            }
+            item {
+                // 系统级：电池优化白名单（回前台时自动刷新状态）
+                val batteryOk = remember { mutableStateOf(false) }
+                LaunchedEffect(Unit) { batteryOk.value = KeepAliveHelper.isIgnoringBatteryOptimizations(context) }
+                val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+                DisposableEffect(lifecycleOwner) {
+                    val obs = androidx.lifecycle.LifecycleEventObserver { _, e ->
+                        if (e == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                            batteryOk.value = KeepAliveHelper.isIgnoringBatteryOptimizations(context)
+                        }
+                    }
+                    lifecycleOwner.lifecycle.addObserver(obs)
+                    onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+                }
+                Preference(
+                    title = { Text(stringResource(R.string.guard_keepalive_battery)) },
+                    summary = {
+                        Text(
+                            stringResource(
+                                if (batteryOk.value) R.string.guard_keepalive_battery_on
+                                else R.string.guard_keepalive_battery_off
+                            )
+                        )
+                    },
+                    icon = { Icon(Icons.Filled.BatteryStd, null) },
+                    onClick = { KeepAliveHelper.requestBatteryExemption(context) }
+                )
+            }
+            item {
+                // Shizuku / Root 一键保活（点击执行 shell 命令并展示逐项结果）
+                KeepAliveRow()
+            }
+
             // ---- 日志 ----
             item { PreferenceCategory(title = { Text(stringResource(R.string.guard_cat_log)) }) }
             item {
@@ -1399,13 +1465,18 @@ private fun GuardSettingsPage(settings: MutableState<GuardSettings>, app: Toolbo
                         2 to stringResource(R.string.guard_level_error),
                         3 to stringResource(R.string.guard_level_heal)
                     )
-                    entries.forEach { (bit, label) ->
-                        FilterChip(
-                            selected = levels and (1 shl bit) != 0,
-                            onClick = { levels = levels xor (1 shl bit) },
-                            label = { Text(label) },
-                            modifier = Modifier.padding(vertical = 2.dp)
-                        )
+                    // 横向流式排列：放不下自动换行，不再每项独占一行
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        entries.forEach { (bit, label) ->
+                            FilterChip(
+                                selected = levels and (1 shl bit) != 0,
+                                onClick = { levels = levels xor (1 shl bit) },
+                                label = { Text(label) }
+                            )
+                        }
                     }
                 }
             },
@@ -1500,6 +1571,122 @@ private fun customActionTip(actionId: String): String = stringResource(
         else -> R.string.guard_action_wifi_cycle_tip
     }
 )
+
+/**
+ * Shizuku / Root 一键保活行：两个按钮分别经对应特权通道执行保活命令
+ * （Doze 白名单 + 后台运行 appops + 前台服务 appops），执行后逐项展示结果。
+ * 通道未授权/未连接时按钮置灰（Shizuku 未授权会先弹授权）。
+ */
+@Composable
+private fun KeepAliveRow() {
+    val context = LocalContext.current
+    val app = context.applicationContext as? ToolboxApp
+    val scope = rememberCoroutineScope()
+    var shizukuRunning by remember { mutableStateOf(false) }
+    var rootRunning by remember { mutableStateOf(false) }
+    var shizukuResult by remember { mutableStateOf<KeepAliveHelper.KeepAliveResult?>(null) }
+    var rootResult by remember { mutableStateOf<KeepAliveHelper.KeepAliveResult?>(null) }
+    var toastMsg by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(toastMsg) {
+        toastMsg?.let {
+            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+            toastMsg = null
+        }
+    }
+
+    val pkg = context.packageName
+
+    fun resultText(r: KeepAliveHelper.KeepAliveResult): String {
+        val marks = listOf(
+            "Doze " + if (r.doze) "✓" else "✗",
+            "RUN_ANY " + if (r.runAnyBg) "✓" else "✗",
+            "RUN " + if (r.runBg) "✓" else "✗",
+            "FGS " + if (r.fgs) "✓" else "✗"
+        )
+        return marks.joinToString(" · ")
+    }
+
+    Column(modifier = Modifier.padding(horizontal = 12.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                onClick = {
+                    if (WifiHealer.isShizukuAvailable()) {
+                        shizukuRunning = true
+                        scope.launch {
+                            val r = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                KeepAliveHelper.applyViaShizuku(pkg)
+                            }
+                            shizukuResult = r
+                            shizukuRunning = false
+                        }
+                    } else {
+                        val a = app
+                        if (a != null) {
+                            checkShizukuUI(a, onGranted = {
+                                toastMsg = context.getString(R.string.guard_keepalive_granted)
+                            })
+                        }
+                    }
+                },
+                enabled = !shizukuRunning
+            ) {
+                Text(
+                    if (shizukuRunning) stringResource(R.string.guard_keepalive_running)
+                    else stringResource(R.string.guard_keepalive_shizuku)
+                )
+            }
+            Button(
+                onClick = {
+                    val a = app
+                    val ready = a != null && try {
+                        a.aidl.ipc != null
+                    } catch (_: Exception) {
+                        false
+                    }
+                    if (a != null && ready) {
+                        rootRunning = true
+                        scope.launch {
+                            val r = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                KeepAliveHelper.applyViaRoot(a, pkg)
+                            }
+                            rootResult = r
+                            rootRunning = false
+                        }
+                    } else if (a != null) {
+                        toastMsg = context.getString(R.string.guard_keepalive_root_unavailable)
+                        try {
+                            a.aidl.startAIDLServiceRoot()
+                        } catch (_: Exception) {
+                        }
+                    }
+                },
+                enabled = !rootRunning
+            ) {
+                Text(
+                    if (rootRunning) stringResource(R.string.guard_keepalive_running)
+                    else stringResource(R.string.guard_keepalive_root)
+                )
+            }
+        }
+        shizukuResult?.let {
+            Text(
+                "Shizuku: " + resultText(it),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+        }
+        rootResult?.let {
+            Text(
+                "Root: " + resultText(it),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 2.dp)
+            )
+        }
+    }
+}
 
 /** 记录日志类型 → 摘要文本（全部 / 用 · 连接的类型名） */
 @Composable

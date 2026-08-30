@@ -1,3 +1,12 @@
+# v3.0.0_Alpha-12
+
+- 新增：后台保活三级方案（解决息屏/后台后不检测不自愈）——设置页新增「后台保活」分组：
+  - 系统级①「息屏保持检测（唤醒锁）」：持有 PARTIAL_WAKE_LOCK 防止息屏后 CPU 深睡暂停检测协程（默认开启，可关）；设置热加载即时生效，服务停止时释放
+  - 系统级②「电池优化白名单」：拉起系统豁免弹窗（免特权），回前台自动刷新豁免状态
+  - Shizuku / Root 一键保活：执行 dumpsys deviceidle whitelist +<包名>（Doze 白名单）、cmd appops set RUN_ANY_IN_BACKGROUND / RUN_IN_BACKGROUND / START_FOREGROUND_SERVICE allow（国产 ROM 后台查杀关键开关，网络调研验证的通行做法），执行后回读校验并逐项显示 ✓/✗（Doze · RUN_ANY · RUN · FGS）；Shizuku 未授权先弹授权，Root 未连接自动拉起
+- 修复：WiFi 总开关循环（wifi cycle）后部分 ROM 不自动回连上次 WiFi——重新开启后轮询观察 8 秒，仍未回连则按当前执行通道显式定向重连（Android 11+ 用 cmd wifi connect-network 已保存网络免密码；全版本兜底 netId enableNetwork 定向连接）
+- 优化：「记录日志类型」弹窗选项改为横向流式排列（自动换行，不再每项独占一行）
+- 澄清：「记录日志类型」tip 明确其控制写入（内存与保存文件），与状态页实时日志的显示筛选互不影响
 # v3.0.0_Alpha-11
 
 - 新增：守护通知操作按钮——运行中通知附「关闭」直接停止守护、「结束」终止应用自身（先停各常驻服务抵消 START_STICKY 自动重启，再停 Root AIDL、取消通知，最后干净杀进程，不会"结束变重启"）；未运行常驻通知附「开启」一键启动守护与「结束」按钮（通知按钮属用户交互，豁免 Android 12+ 后台前台服务启动限制）

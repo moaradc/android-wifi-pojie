@@ -2,6 +2,8 @@ package com.wifi.toolbox.utils
 
 import android.content.Context
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.wifi.WifiManager
 import android.os.Build
 import com.wifi.toolbox.ToolboxApp
@@ -267,6 +269,74 @@ class WifiHealer(
             )?.key
     }
 
+    /**
+     * WiFi 总开关循环后的回连兑底：
+     * 系统重新开启 WiFi 后会 auto-join 上次网络，但部分 ROM（尤其后台
+     * 省电策略下）会拖延甚至不回连。先轮询观察 8s，仍未回连则按当前
+     * 通道显式定向重连上次网络（Android 11+ 用 cmd wifi connect-network
+     * 已保存网络免密码；各通道均可用 netId enableNetwork 兼容旧版本）。
+     */
+    private suspend fun ensureRejoinAfterCycle(ssid: String, netId: Int) {
+        val deadline = System.currentTimeMillis() + 8_000L
+        while (System.currentTimeMillis() < deadline) {
+            delay(1_200L)
+            if (isWifiTransportConnected()) return   // 系统已自动回连
+        }
+        // 8s 未回连 → 先试 cmd 定向重连（仅 Android 11+，已保存网络免密码）
+        if (Build.VERSION.SDK_INT >= 30 && ssid.isNotEmpty()) {
+            val ok = runPrivileged(
+                shizuku = { shizukuExecBool("cmd wifi connect-network \"$ssid\" wpa2") },
+                aidl = { aidlExec("cmd wifi connect-network \"$ssid\" wpa2") },
+                api = { false }
+            )
+            if (ok) return
+        }
+        // 兑底：按 netId 启用并定向连接（全版本兼容）
+        if (netId != -1) {
+            runPrivileged(
+                shizuku = { shizukuEnableNetwork(netId) },
+                aidl = { aidlExec("cmd wifi enable-network $netId") },
+                api = {
+                    @Suppress("DEPRECATION")
+                    (context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager)
+                        .enableNetwork(netId, true)
+                }
+            )
+        }
+    }
+
+    /** WiFi 链路层是否已连接（任意 WiFi 网络） */
+    private fun isWifiTransportConnected(): Boolean {
+        return try {
+            val cm = context.applicationContext
+                .getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            cm.allNetworks.any { n ->
+                try {
+                    cm.getNetworkCapabilities(n)
+                        ?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+                } catch (_: Exception) {
+                    false
+                }
+            }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /** Shizuku 通道：启用并定向连接指定 netId（全版本兼容） */
+    private fun shizukuEnableNetwork(netId: Int): Boolean {
+        return try {
+            val service = shizukuWifiService()
+            val enable = ShizukuUtil.getWifiMethod(service, "enableNetwork")
+            when (enable.parameterTypes.size) {
+                3 -> enable.invoke(service, netId, true, ShizukuUtil.PACKAGE_NAME)
+                else -> enable.invoke(service, netId, true)
+            } as? Boolean ?: true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     private suspend fun executeAction(
         action: String,
         ssid: String,
@@ -326,27 +396,33 @@ class WifiHealer(
                 } else false
             }
 
-            HealActions.WIFI_CYCLE -> runPrivileged(
-                shizuku = {
-                    ShizukuUtil.setWifiEnabled(false)
-                    delay(1500)
-                    ShizukuUtil.setWifiEnabled(true)
-                    true
-                },
-                aidl = {
-                    val a = app ?: return@runPrivileged false
-                    AidlServiceHelper.setWifiEnabled(a, false)
-                    delay(1500)
-                    AidlServiceHelper.setWifiEnabled(a, true)
-                    true
-                },
-                api = {
-                    val ok1 = ApiUtil.setWifiEnabled(context, false)
-                    delay(1500)
-                    val ok2 = ApiUtil.setWifiEnabled(context, true)
-                    ok1 && ok2
-                }
-            )
+            HealActions.WIFI_CYCLE -> {
+                val cycleOk = runPrivileged(
+                    shizuku = {
+                        ShizukuUtil.setWifiEnabled(false)
+                        delay(1500)
+                        ShizukuUtil.setWifiEnabled(true)
+                        true
+                    },
+                    aidl = {
+                        val a = app ?: return@runPrivileged false
+                        AidlServiceHelper.setWifiEnabled(a, false)
+                        delay(1500)
+                        AidlServiceHelper.setWifiEnabled(a, true)
+                        true
+                    },
+                    api = {
+                        val ok1 = ApiUtil.setWifiEnabled(context, false)
+                        delay(1500)
+                        val ok2 = ApiUtil.setWifiEnabled(context, true)
+                        ok1 && ok2
+                    }
+                )
+                // 重新开启后系统会自动回连上次网络（auto-join），但部分 ROM
+                // 后台省电下会拖延或干脆不连；等待后仍未回连则显式定向重连
+                if (cycleOk) ensureRejoinAfterCycle(ssid, netId)
+                cycleOk
+            }
 
             else -> false
         }

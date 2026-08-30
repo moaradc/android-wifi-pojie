@@ -111,6 +111,13 @@ data class GuardSettings(
     val showPersistentNotification: Boolean = SHOW_PERSISTENT_NOTIFICATION_DEFAULT,
 
     /**
+     * 后台保活——息屏唤醒锁：持有 PARTIAL_WAKE_LOCK，防止息屏后 CPU
+     * 休眠导致检测协程定时器暂停（delay 漂移）。略增耗电，可关。
+     * （Doze 白名单/appops 等更强手段由 KeepAliveHelper 一键命令完成）
+     */
+    val keepAliveWakeLock: Boolean = KEEP_ALIVE_WAKELOCK_DEFAULT,
+
+    /**
      * 记录哪些类型的日志到实时日志（位掩码，默认全部）：
      * bit0 = INFO 正常（在线检测结果等）
      * bit1 = WARN 警告（跳过/豁免类事件）
@@ -164,6 +171,7 @@ data class GuardSettings(
         const val NOTIFY_ON_HEAL_KEY = "guard_notify_on_heal"
         const val NOTIFY_ON_HEAL_FAIL_KEY = "guard_notify_on_heal_fail"
         const val SHOW_PERSISTENT_NOTIFICATION_KEY = "guard_show_persistent_notification"
+        const val KEEP_ALIVE_WAKELOCK_KEY = "guard_keep_alive_wakelock"
         const val VERBOSE_LOG_KEY = "guard_verbose_log" // 旧版布尔开关（迁移源）
         const val LOG_LEVELS_KEY = "guard_log_levels"
         const val LOG_DIR_URI_KEY = "guard_log_dir_uri"
@@ -189,6 +197,8 @@ data class GuardSettings(
         const val NOTIFY_ON_HEAL_DEFAULT = true
         const val NOTIFY_ON_HEAL_FAIL_DEFAULT = true
         const val SHOW_PERSISTENT_NOTIFICATION_DEFAULT = true
+        /** 默认开启唤醒锁（用户诉求即“后台也要检测”；不想要可在设置关） */
+        const val KEEP_ALIVE_WAKELOCK_DEFAULT = true
         const val VERBOSE_LOG_DEFAULT = true
         /** 默认记录全部类型（正常+警告+错误+自愈） */
         const val LOG_LEVELS_DEFAULT = 0b1111
@@ -256,6 +266,9 @@ data class GuardSettings(
                 ),
                 showPersistentNotification = prefs.getBoolean(
                     SHOW_PERSISTENT_NOTIFICATION_KEY, SHOW_PERSISTENT_NOTIFICATION_DEFAULT
+                ),
+                keepAliveWakeLock = prefs.getBoolean(
+                    KEEP_ALIVE_WAKELOCK_KEY, KEEP_ALIVE_WAKELOCK_DEFAULT
                 ),
                 // 迁移：旧版 verboseLog=false → 仅记录 异常+自愈；否则全部记录
                 logLevels = if (prefs.contains(LOG_LEVELS_KEY)) {

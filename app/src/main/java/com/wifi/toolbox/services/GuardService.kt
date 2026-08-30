@@ -16,6 +16,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import com.wifi.toolbox.R
 import com.wifi.toolbox.ToolboxApp
@@ -74,6 +75,7 @@ class GuardService : Service() {
     private var consecutiveHealFails = 0     // 连续自愈失败计数（指数退避+熔断）
     private var lastEventLog = ""            // 最近一次事件触发的 action（去重）
     private var breakerNotified = false      // 熔断提示已发（防重复日志/通知）
+    private var wakeLock: PowerManager.WakeLock? = null  // 后台保活：息屏 CPU 唤醒锁
 
     override fun onCreate() {
         super.onCreate()
@@ -82,6 +84,7 @@ class GuardService : Service() {
         stats = (applicationContext as ToolboxApp).guardStats
         healer = WifiHealer(this, applicationContext as? ToolboxApp)
         registerEventReceiver()
+        // reloadSettings() 内已同步唤醒锁
         GuardState.running = true
         GuardState.stats = stats
     }
@@ -89,6 +92,32 @@ class GuardService : Service() {
     private fun reloadSettings() {
         settings = GuardSettings.from(prefs)
         GuardState.settings = settings
+        syncWakeLock()   // 设置热加载时唤醒锁即时开/关
+    }
+
+    /**
+     * 后台保活（系统级）：按设置持有/释放 PARTIAL_WAKE_LOCK。
+     * 息屏后 CPU 深睡会暂停协程 delay 定时器（表现为“后台不检测”），
+     * 持有部分唤醒锁保证检测/自愈循环照常运行。非引用计数，重复 acquire 前先释放。
+     */
+    private fun syncWakeLock() {
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        if (settings.keepAliveWakeLock) {
+            if (wakeLock?.isHeld != true) {
+                wakeLock = pm.newWakeLock(
+                    PowerManager.PARTIAL_WAKE_LOCK, "wifi.toolbox:guard"
+                ).apply {
+                    setReferenceCounted(false)
+                    acquire()
+                }
+            }
+        } else {
+            try {
+                wakeLock?.takeIf { it.isHeld }?.release()
+            } catch (_: Exception) {
+            }
+            wakeLock = null
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -474,6 +503,11 @@ class GuardService : Service() {
         super.onDestroy()
         loopJob?.cancel()
         scope.cancel()
+        try {
+            wakeLock?.takeIf { it.isHeld }?.release()
+        } catch (_: Exception) {
+        }
+        wakeLock = null
         GuardState.running = false
         GuardState.currentState = GuardState.STATE_IDLE
         // "常驻守护通知"开启：服务停止后仍保留"未运行"常驻通知（开关关闭则由系统
