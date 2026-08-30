@@ -136,6 +136,7 @@
     <string name="mgr_copied">Copied</string>
     <string name="mgr_password">Password</string>
     <string name="mgr_pwd_hidden">Hidden (Root/Shizuku required)</string>
+    <string name="mgr_pwd_open">Open net, no pwd</string>
     <string name="mgr_connect">Connect</string>
     <string name="mgr_forget">Forget</string>
     <string name="mgr_forget_confirm">This removes "%1$s" from saved networks and cannot be undone</string>
@@ -179,6 +180,10 @@
     <string name="mgr_pwd_field_label">Secret code</string>
     <string name="mgr_pwd_empty">✗ Give secret code first</string>
     <string name="mgr_lbl_mobile">Move net</string>
+    <string name="mgr_net_wifi">WiFi net</string>
+    <string name="mgr_portal_dialog_title">Need web sign-in</string>
+    <string name="mgr_portal_dialog_msg">%1$s linked, but this net needs web sign-in (login / SMS code) before net works. Go WiFi set to sign in.</string>
+    <string name="mgr_portal_dialog_go">Go WiFi set</string>
     <string name="mgr_lbl_state">State</string>
     <string name="mgr_mobile_connected">Linked</string>
     <string name="mgr_mobile_connected_validated">Linked · Checked OK</string>

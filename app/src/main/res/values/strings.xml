@@ -137,6 +137,7 @@
     <string name="mgr_copied">已复制</string>
     <string name="mgr_password">密码</string>
     <string name="mgr_pwd_hidden">不可见（需 Root/Shizuku）</string>
+    <string name="mgr_pwd_open">开放网络，无需密码</string>
     <string name="mgr_connect">连接</string>
     <string name="mgr_forget">忘记</string>
     <string name="mgr_forget_confirm">将删除系统中的「%1$s」网络配置，此操作不可撤销</string>
@@ -180,6 +181,10 @@
     <string name="mgr_pwd_field_label">密码</string>
     <string name="mgr_pwd_empty">✗ 请输入密码</string>
     <string name="mgr_lbl_mobile">移动数据网络</string>
+    <string name="mgr_net_wifi">WiFi 网络</string>
+    <string name="mgr_portal_dialog_title">需要网页认证</string>
+    <string name="mgr_portal_dialog_msg">「%1$s」已连接，但该网络需要完成网页认证（账号登录 / 短信验证码等）后才能上网。请前往系统 WiFi 设置完成认证。</string>
+    <string name="mgr_portal_dialog_go">前往系统 WiFi 设置</string>
     <string name="mgr_lbl_state">状态</string>
     <string name="mgr_mobile_connected">已连接</string>
     <string name="mgr_mobile_connected_validated">已连接 · 已验证</string>

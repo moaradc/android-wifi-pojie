@@ -135,6 +135,7 @@
     <string name="mgr_copied">Copied</string>
     <string name="mgr_password">Password</string>
     <string name="mgr_pwd_hidden">Hidden (Root/Shizuku required)</string>
+    <string name="mgr_pwd_open">Open network, no password</string>
     <string name="mgr_connect">Connect</string>
     <string name="mgr_forget">Forget</string>
     <string name="mgr_forget_confirm">This removes "%1$s" from saved networks and cannot be undone</string>
@@ -178,6 +179,10 @@
     <string name="mgr_pwd_field_label">Password</string>
     <string name="mgr_pwd_empty">✗ Please enter a password</string>
     <string name="mgr_lbl_mobile">Mobile data</string>
+    <string name="mgr_net_wifi">Wi-Fi</string>
+    <string name="mgr_portal_dialog_title">Web sign-in required</string>
+    <string name="mgr_portal_dialog_msg">“%1$s” is connected, but this network needs web sign-in (account login / SMS code, etc.) before the Internet is usable. Please finish sign-in from system Wi-Fi settings.</string>
+    <string name="mgr_portal_dialog_go">Open Wi-Fi settings</string>
     <string name="mgr_lbl_state">Status</string>
     <string name="mgr_mobile_connected">Connected</string>
     <string name="mgr_mobile_connected_validated">Connected · Validated</string>

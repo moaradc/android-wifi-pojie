@@ -1,14 +1,11 @@
 package com.wifi.toolbox.ui.screen
 
+import android.content.Intent
+import android.provider.Settings
 import android.widget.Toast
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -29,7 +26,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -67,6 +63,32 @@ fun ManageScreen(onMenuClick: () -> Unit) {
     val app = context.applicationContext as ToolboxApp
     val controller = rememberManagerController(context, app)
     var selectedIndex by rememberSaveable { mutableIntStateOf(0) }
+
+    // 认证网络（Captive Portal）提示：刚连接的 WiFi 被系统判定需要网页认证时
+    // 弹窗说明，并提供跳转系统 WiFi 设置页按钮（认证需在系统侧完成）
+    controller.portalSsid?.let { ssid ->
+        AlertDialog(
+            onDismissRequest = { controller.clearPortalSsid() },
+            title = { Text(stringResource(R.string.mgr_portal_dialog_title)) },
+            text = { Text(stringResource(R.string.mgr_portal_dialog_msg, ssid)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    try {
+                        context.startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
+                    } catch (_: Exception) {
+                    }
+                    controller.clearPortalSsid()
+                }) {
+                    Text(stringResource(R.string.mgr_portal_dialog_go))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { controller.clearPortalSsid() }) {
+                    Text(stringResource(R.string.btn_cancel))
+                }
+            }
+        )
+    }
 
     Box(Modifier.fillMaxSize()) {
         NavContainer(
@@ -346,7 +368,20 @@ private fun ScanNetworkCard(
         ),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
+        // animateContentSize：展开/收起高度平滑过渡（无弹跳）。此前用
+        // AnimatedVisibility(expandVertically) 在已连接状态切换（配色/「当前」
+        // 标签插入触发重组）时会出现卡片塌方（内容叠压、布局崩坏），
+        // 改为常驻组合 + 容器尺寸动画后状态切换只是普通重组，布局稳定。
+        Column(
+            Modifier
+                .animateContentSize(
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioNoBouncy,
+                        stiffness = Spring.StiffnessMediumLow
+                    )
+                )
+                .padding(horizontal = 14.dp, vertical = 12.dp)
+        ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 // 四格信号图标（与密码字典破解运行页同一组件同一分档算法）
                 WifiIcon(
@@ -392,31 +427,9 @@ private fun ScanNetworkCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                // 展开指示箭头（点击后旋转 180°，提供可展开的视觉线索与即时反馈）
-                val chevronAngle by animateFloatAsState(
-                    targetValue = if (expanded) 180f else 0f,
-                    animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioMediumBouncy,
-                        stiffness = Spring.StiffnessMedium
-                    ),
-                    label = "chevron"
-                )
-                Icon(
-                    Icons.Rounded.KeyboardArrowDown,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier
-                        .size(22.dp)
-                        .rotate(chevronAngle)
-                )
             }
 
-            // 展开区：尺寸 + 淡入双重动画（替代此前无过渡的 if 直接拼入）
-            AnimatedVisibility(
-                visible = expanded,
-                enter = expandVertically() + fadeIn(),
-                exit = shrinkVertically() + fadeOut()
-            ) {
+            if (expanded) {
                 Column {
                     Spacer(Modifier.height(10.dp))
                     HorizontalDivider()
@@ -432,36 +445,40 @@ private fun ScanNetworkCard(
                         DetailRow(stringResource(R.string.mgr_lbl_channel), channel.toString())
                     }
                     DetailRow("Security", wifi.capabilities)
-                    Spacer(Modifier.height(10.dp))
-                    // 连接按钮：已保存/已留密码/开放网络直连，未保存加密网络弹密码输入；
-                    // 连接成功系统自动保存配置（无需再单独保存）
-                    Button(
-                        onClick = onConnect,
-                        enabled = connectEnabled,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        if (connecting) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(14.dp),
-                                strokeWidth = 2.dp,
-                                color = MaterialTheme.colorScheme.onPrimary
-                            )
-                            Spacer(Modifier.width(6.dp))
-                            Text(
-                                stringResource(R.string.mgr_connecting_btn),
-                                style = MaterialTheme.typography.labelMedium
-                            )
-                        } else {
-                            Icon(
-                                Icons.Rounded.Link,
-                                contentDescription = null,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Spacer(Modifier.width(6.dp))
-                            Text(
-                                stringResource(R.string.mgr_connect),
-                                style = MaterialTheme.typography.labelMedium
-                            )
+                    // 已连接的网络不再显示「连接」按钮（重复连接无意义，
+                    // 卡片头部已有「当前」标识；其余场景保持原有连接入口）
+                    if (!isCurrent) {
+                        Spacer(Modifier.height(10.dp))
+                        // 连接按钮：已保存/已留密码/开放网络直连，未保存加密网络弹密码输入；
+                        // 连接成功系统自动保存配置（无需再单独保存）
+                        Button(
+                            onClick = onConnect,
+                            enabled = connectEnabled,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            if (connecting) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(14.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.onPrimary
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    stringResource(R.string.mgr_connecting_btn),
+                                    style = MaterialTheme.typography.labelMedium
+                                )
+                            } else {
+                                Icon(
+                                    Icons.Rounded.Link,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    stringResource(R.string.mgr_connect),
+                                    style = MaterialTheme.typography.labelMedium
+                                )
+                            }
                         }
                     }
                     Spacer(Modifier.height(8.dp))
@@ -1082,8 +1099,9 @@ private fun SavedNetworkCard(
                 )
                 Text(
                     text = when {
-                        entry.password.isEmpty() ->
-                            stringResource(R.string.mgr_pwd_hidden)
+                        // 密码不可得时值区显示占位符——解释文案只在右侧标签出现一次
+                        // （历史缺陷：这里与右侧标签重复显示两遍「不可见…」）
+                        entry.password.isEmpty() -> "-"
                         revealed -> entry.password
                         else -> "•".repeat(entry.password.length.coerceIn(6, 12))
                     },
@@ -1113,9 +1131,14 @@ private fun SavedNetworkCard(
                         )
                     }
                 } else if (entry.passwordFromPojie.not() && entry.fromSystem) {
-                    // 系统有配置但密码不可见（Android 10+ 限制），给出解释性小标签
+                    // 密码不可见的解释性小标签（唯一一处）：开放网络如实说明
+                    // 无需密码；加密网络说明需特权通道（Android 10+ 官方限制，
+                    // Root/Shizuku 特权通道大多可见、系统 API 恒不可见）
                     Text(
-                        stringResource(R.string.mgr_pwd_hidden),
+                        stringResource(
+                            if (entry.security == "OPEN") R.string.mgr_pwd_open
+                            else R.string.mgr_pwd_hidden
+                        ),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1195,12 +1218,18 @@ private fun SavedNetworkCard(
     }
 }
 
-// ==================== Tab3：当前网络 + 诊断 ====================
+// ==================== Tab3：网络（多网络同显）+ 诊断 ====================
 
 @Composable
 private fun NetworkTabPage(controller: ManagerController) {
-    val info = controller.currentInfo
-    val (band, channel) = freqToBandChannel(info.frequencyMhz)
+    val info = controller.currentInfo          // 诊断卡的「WiFi 已连接」判定用
+    val entries = controller.networkEntries
+    val connectedCount = entries.count { it.connected }
+
+    // 多于一个已连接网络（WiFi+移动数据同开，或双 STA 双 WiFi）时，
+    // 每张卡自动折叠分割线下方的信号强度/链路速率等详情，点击卡片展开
+    val multi = connectedCount > 1
+    val expandedKeys = remember { mutableStateMapOf<Long, Boolean>() }
 
     // 进入页面与手动刷新时读取当前网络
     LaunchedEffect(Unit) { controller.refreshCurrent() }
@@ -1211,169 +1240,46 @@ private fun NetworkTabPage(controller: ManagerController) {
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // ---- 当前连接卡 ----
+        // ---- 概览行：已连接网络数 + 手动刷新 ----
         item {
-            Card(
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainer
-                ),
-                modifier = Modifier.fillMaxWidth()
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(Modifier.padding(18.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            if (info.connected) Icons.Rounded.Wifi else Icons.Rounded.WifiOff,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            text = stringResource(R.string.mgr_tab_network),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Spacer(Modifier.weight(1f))
-                        if (info.connected) {
-                            TagItem(
-                                if (info.validated) stringResource(R.string.mgr_validated)
-                                else stringResource(R.string.mgr_not_validated),
-                                if (info.validated) TagType.Primary else TagType.Tertiary
-                            )
-                        }
-                        IconButton(
-                            onClick = { controller.refreshCurrent() },
-                            modifier = Modifier.size(28.dp)
-                        ) {
-                            Icon(
-                                Icons.Rounded.Refresh,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    }
-
-                    Spacer(Modifier.height(10.dp))
-                    Text(
-                        text = info.ssid.ifEmpty {
-                            stringResource(
-                                if (info.connected) R.string.wifi_connected_generic
-                                else R.string.not_connected
-                            )
-                        },
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.SemiBold
+                Text(
+                    text = stringResource(R.string.mgr_networks_count, connectedCount),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.weight(1f))
+                IconButton(
+                    onClick = { controller.refreshCurrent() },
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(
+                        Icons.Rounded.Refresh,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
                     )
-                    // 定位服务关闭等场景 WifiInfo.getBSSID() 返回匿名化占位 MAC
-                    // （02:00:00:00:00:00），并非真实 BSSID——如实提示而非展示假地址
-                    if (info.bssid.isNotEmpty()) {
-                        val isAnonymized = info.bssid.equals(ANONYMIZED_BSSID, ignoreCase = true)
-                        Text(
-                            text = if (isAnonymized)
-                                stringResource(R.string.mgr_bssid_hidden)
-                            else info.bssid,
-                            style = MaterialTheme.typography.bodySmall,
-                            fontFamily = FontFamily.Monospace,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-
-                    if (info.connected && info.rssi > -200) {
-                        Spacer(Modifier.height(12.dp))
-                        SignalMeter(info.rssi)
-                    }
-
-                    Spacer(Modifier.height(12.dp))
-                    HorizontalDivider()
-                    Spacer(Modifier.height(10.dp))
-
-                    DetailRow(stringResource(R.string.mgr_lbl_rssi), "${info.rssi} dBm")
-                    if (info.linkSpeedMbps > 0) {
-                        DetailRow(
-                            stringResource(R.string.mgr_lbl_speed),
-                            "${info.linkSpeedMbps} Mbps"
-                        )
-                    }
-                    if (info.frequencyMhz > 0) {
-                        DetailRow(
-                            stringResource(R.string.mgr_lbl_band),
-                            "${info.frequencyMhz} MHz · $band"
-                        )
-                        if (channel > 0) {
-                            DetailRow(
-                                stringResource(R.string.mgr_lbl_channel),
-                                channel.toString()
-                            )
-                        }
-                    }
-                    DetailRow(stringResource(R.string.mgr_lbl_ip), info.ipAddress)
-                    DetailRow(stringResource(R.string.mgr_lbl_gateway), info.gateway)
-                    DetailRow(
-                        stringResource(R.string.mgr_lbl_dns),
-                        info.dnsServers.joinToString(", ")
-                    )
-                    if (info.dhcpServer.isNotEmpty()) {
-                        DetailRow(stringResource(R.string.mgr_lbl_dhcp), info.dhcpServer)
-                    }
-                    if (info.leaseDurationSec > 0) {
-                        DetailRow(
-                            stringResource(R.string.mgr_lbl_lease),
-                            "${info.leaseDurationSec}s"
-                        )
-                    }
-
-                    // ---- 移动数据网络（免权限 API：连接状态/验证结论/运营商/漫游） ----
-                    Spacer(Modifier.height(12.dp))
-                    HorizontalDivider()
-                    Spacer(Modifier.height(10.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            Icons.Rounded.SignalCellular4Bar,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            text = stringResource(R.string.mgr_lbl_mobile),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Spacer(Modifier.weight(1f))
-                        if (info.mobileConnected) {
-                            TagItem(
-                                if (info.mobileValidated) stringResource(R.string.mgr_validated)
-                                else stringResource(R.string.mgr_not_validated),
-                                if (info.mobileValidated) TagType.Primary else TagType.Tertiary
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(6.dp))
-                    DetailRow(
-                        stringResource(R.string.mgr_lbl_state),
-                        if (info.mobileConnected)
-                            stringResource(
-                                if (info.mobileValidated) R.string.mgr_mobile_connected_validated
-                                else R.string.mgr_mobile_connected
-                            )
-                        else stringResource(R.string.mgr_mobile_off)
-                    )
-                    if (info.mobileCarrier.isNotEmpty()) {
-                        DetailRow(stringResource(R.string.mgr_lbl_carrier), info.mobileCarrier)
-                    }
-                    if (info.mobileConnected) {
-                        DetailRow(
-                            stringResource(R.string.mgr_lbl_roaming),
-                            stringResource(
-                                if (info.mobileRoaming) R.string.mgr_yes else R.string.mgr_no
-                            )
-                        )
-                    }
                 }
             }
+        }
+
+        // ---- 每网络一卡：WiFi（可多个）与移动数据同屏全部列出 ----
+        items(entries, key = { (if (it.isWifi) "w" else "c") + it.handle }) { entry ->
+            NetworkCard(
+                entry = entry,
+                collapsible = multi && entry.connected,
+                expanded = if (multi && entry.connected)
+                    expandedKeys[entry.handle] == true
+                else true,
+                onToggle = {
+                    expandedKeys[entry.handle] = !(expandedKeys[entry.handle] == true)
+                },
+                portalText = portalText
+            )
         }
 
         // ---- 诊断卡 ----
@@ -1459,6 +1365,188 @@ private fun NetworkTabPage(controller: ManagerController) {
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 网络页单网络卡片（WiFi 与移动数据同一组件渲染）：
+ * - 头部：类型图标 + 类型名（WiFi 网络 / 移动数据网络）+ 认证/验证标签；
+ * - 标题行：WiFi 为 SSID、移动数据为运营商名；
+ * - 分割线下方详情（WiFi：信号强度/链路速率/频段/信道/IP 等；移动数据：
+ *   状态/运营商/漫游）在「多网络同显」时自动折叠，点击卡片展开（静态
+ *   指示箭头，无弹性动画）；单网络时常显全部详情。
+ */
+@Composable
+private fun NetworkCard(
+    entry: NetworkEntry,
+    collapsible: Boolean,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    portalText: String
+) {
+    val (band, channel) = freqToBandChannel(entry.frequencyMhz)
+
+    Card(
+        onClick = onToggle,
+        enabled = collapsible,
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer
+        ),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(Modifier.padding(18.dp)) {
+            // 头部：类型 + 状态标签 + 折叠指示（静态箭头）
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    if (entry.isWifi) {
+                        if (entry.connected) Icons.Rounded.Wifi else Icons.Rounded.WifiOff
+                    } else Icons.Rounded.SignalCellular4Bar,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = stringResource(
+                        if (entry.isWifi) R.string.mgr_net_wifi else R.string.mgr_lbl_mobile
+                    ),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(Modifier.weight(1f))
+                if (entry.connected) {
+                    if (entry.portal) {
+                        TagItem(portalText, TagType.Tertiary)
+                    } else {
+                        TagItem(
+                            if (entry.validated) stringResource(R.string.mgr_validated)
+                            else stringResource(R.string.mgr_not_validated),
+                            if (entry.validated) TagType.Primary else TagType.Tertiary
+                        )
+                    }
+                }
+                if (collapsible) {
+                    Icon(
+                        if (expanded) Icons.Rounded.KeyboardArrowUp
+                        else Icons.Rounded.KeyboardArrowDown,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
+            // 标题行：WiFi=SSID（空则按连接状态兜底）；移动数据=运营商名
+            Text(
+                text = entry.title.ifEmpty {
+                    stringResource(
+                        when {
+                            !entry.isWifi -> R.string.mgr_lbl_mobile
+                            entry.connected -> R.string.wifi_connected_generic
+                            else -> R.string.not_connected
+                        }
+                    )
+                },
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.SemiBold
+            )
+            // 副标题：WiFi=BSSID；移动数据=连接状态
+            if (entry.isWifi) {
+                // 定位服务关闭等场景 WifiInfo.getBSSID() 返回匿名化占位 MAC
+                // （02:00:00:00:00:00），并非真实 BSSID——如实提示而非展示假地址
+                if (entry.bssid.isNotEmpty()) {
+                    val isAnonymized =
+                        entry.bssid.equals(ANONYMIZED_BSSID, ignoreCase = true)
+                    Text(
+                        text = if (isAnonymized)
+                            stringResource(R.string.mgr_bssid_hidden)
+                        else entry.bssid,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            } else {
+                Text(
+                    text = stringResource(
+                        if (entry.validated) R.string.mgr_mobile_connected_validated
+                        else R.string.mgr_mobile_connected
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            if (entry.isWifi && entry.connected && entry.rssi > -200) {
+                Spacer(Modifier.height(12.dp))
+                SignalMeter(entry.rssi)
+            }
+
+            // ---- 分割线下方详情（多网络时自动折叠，点击卡片展开） ----
+            if (expanded) {
+                Spacer(Modifier.height(12.dp))
+                HorizontalDivider()
+                Spacer(Modifier.height(10.dp))
+
+                if (entry.isWifi) {
+                    DetailRow(
+                        stringResource(R.string.mgr_lbl_rssi),
+                        "${entry.rssi} dBm"
+                    )
+                    if (entry.linkSpeedMbps > 0) {
+                        DetailRow(
+                            stringResource(R.string.mgr_lbl_speed),
+                            "${entry.linkSpeedMbps} Mbps"
+                        )
+                    }
+                    if (entry.frequencyMhz > 0) {
+                        DetailRow(
+                            stringResource(R.string.mgr_lbl_band),
+                            "${entry.frequencyMhz} MHz · $band"
+                        )
+                        if (channel > 0) {
+                            DetailRow(
+                                stringResource(R.string.mgr_lbl_channel),
+                                channel.toString()
+                            )
+                        }
+                    }
+                    DetailRow(stringResource(R.string.mgr_lbl_ip), entry.ipAddress)
+                    DetailRow(stringResource(R.string.mgr_lbl_gateway), entry.gateway)
+                    DetailRow(
+                        stringResource(R.string.mgr_lbl_dns),
+                        entry.dnsServers.joinToString(", ")
+                    )
+                    if (entry.dhcpServer.isNotEmpty()) {
+                        DetailRow(stringResource(R.string.mgr_lbl_dhcp), entry.dhcpServer)
+                    }
+                    if (entry.leaseDurationSec > 0) {
+                        DetailRow(
+                            stringResource(R.string.mgr_lbl_lease),
+                            "${entry.leaseDurationSec}s"
+                        )
+                    }
+                } else {
+                    DetailRow(
+                        stringResource(R.string.mgr_lbl_state),
+                        stringResource(
+                            if (entry.validated) R.string.mgr_mobile_connected_validated
+                            else R.string.mgr_mobile_connected
+                        )
+                    )
+                    if (entry.carrier.isNotEmpty()) {
+                        DetailRow(stringResource(R.string.mgr_lbl_carrier), entry.carrier)
+                    }
+                    DetailRow(
+                        stringResource(R.string.mgr_lbl_roaming),
+                        stringResource(if (entry.roaming) R.string.mgr_yes else R.string.mgr_no)
+                    )
                 }
             }
         }

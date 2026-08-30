@@ -76,6 +76,34 @@ data class CurrentNetworkInfo(
     val mobileCarrier: String = ""          // 运营商名（networkOperatorName 兜底 simOperatorName）
 )
 
+/** 网络页多网络条目（WiFi 与移动数据统一模型）
+ *
+ * 一般用户同一时刻只连一个网络（WiFi 或移动数据），但两者可同开，
+ * 个别系统（双 STA）甚至能同时连接多个 WiFi——网络页按「一卡一网」
+ * 全部列出；多于一个已连接网络时卡片自动折叠分割线下方的详情。
+ */
+data class NetworkEntry(
+    val isWifi: Boolean,                // true=WiFi 网络；false=移动数据网络
+    val connected: Boolean,             // WiFi 占位卡（未连接）为 false
+    val handle: Long,                   // networkHandle（展开状态记忆与列表 key）
+    val title: String,                  // WiFi: SSID；移动数据: 运营商名
+    val bssid: String = "",             // WiFi 专属（可能被系统匿名化为 02:00:…）
+    val validated: Boolean = false,     // 系统验证结论（NET_CAPABILITY_VALIDATED）
+    val portal: Boolean = false,        // 需网页认证（NET_CAPABILITY_CAPTIVE_PORTAL）
+    // ---- WiFi 专属 ----
+    val rssi: Int = -200,
+    val linkSpeedMbps: Int = -1,
+    val frequencyMhz: Int = 0,
+    val ipAddress: String = "",
+    val gateway: String = "",
+    val dnsServers: List<String> = emptyList(),
+    val dhcpServer: String = "",
+    val leaseDurationSec: Int = 0,
+    // ---- 移动数据专属 ----
+    val carrier: String = "",           // 运营商名（title 为空时兼作标题）
+    val roaming: Boolean = false
+)
+
 /** WifiInfo.getBSSID() 在定位服务关闭等场景返回的匿名化占位 MAC（非真实 BSSID） */
 const val ANONYMIZED_BSSID = "02:00:00:00:00:00"
 
@@ -99,6 +127,15 @@ fun securitySummary(capabilities: String): String {
         capabilities.contains("ESS") -> "OPEN"
         else -> "?"
     }
+}
+
+/** 已保存配置是否为开放（无密码）网络：未设置任何密钥管理，或仅 NONE */
+private fun isOpenNetwork(cfg: WifiConfiguration): Boolean = try {
+    val akm = cfg.allowedKeyManagement
+    akm.cardinality() == 0 ||
+            (akm.cardinality() == 1 && akm.get(WifiConfiguration.KeyMgmt.NONE))
+} catch (_: Exception) {
+    false
 }
 
 /** 频率(MHz)→(频段标签, 信道号)；信道号换算依据 IEEE 802.11 标准 */
@@ -141,10 +178,16 @@ interface ManagerController {
 
     // ---- Tab3 当前网络 ----
     val currentInfo: CurrentNetworkInfo
+    val networkEntries: List<NetworkEntry>   // 全部已连接网络（WiFi 可多个 + 移动数据）
     fun refreshCurrent()
     val diagnosing: Boolean
     val diagnosisResults: List<com.wifi.toolbox.utils.ProbeResult>
     fun runDiagnosis()
+
+    // ---- 认证网络（Captive Portal）检测 ----
+    /** 刚连接成功且被系统判定需要网页认证的 SSID（非空即弹窗提示） */
+    val portalSsid: String?
+    fun clearPortalSsid()
 
     /** 指定网络是否为当前连接（SSID 或 netId 双匹配，定位关闭时 netId 经特权解析） */
     fun isCurrentNetwork(ssid: String, networkId: Int): Boolean
@@ -181,6 +224,11 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
     }
     var diagnosingState by remember { mutableStateOf(false) }
     var diagnosisResultsState by remember { mutableStateOf<List<ProbeResult>>(emptyList()) }
+
+    // ---- Tab3 多网络列表 + 认证网络检测 ----
+    var networkEntriesState by remember { mutableStateOf<List<NetworkEntry>>(emptyList()) }
+    var portalSsidState by remember { mutableStateOf<String?>(null) }
+    var portalJob by remember { mutableStateOf<Job?>(null) }
 
     // ---- 当前 WiFi 身份会话缓存（networkHandle 变化 = 新连接会话） ----
     var identitySsidState by remember { mutableStateOf("") }
@@ -335,6 +383,7 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
                         password = pwd,
                         passwordFromPojie = systemPwd.isEmpty() && hist != null,
                         fromSystem = true,
+                        security = if (isOpenNetwork(cfg)) "OPEN" else "",
                         hasPojieRecord = hist != null,
                         pojieTime = hist?.lasttime ?: 0L
                     )
@@ -364,6 +413,196 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
     @android.annotation.SuppressLint("MissingPermission")
     fun performSaved() {
         scope.launch { performSavedNow(silent = false) }
+    }
+
+    /** API 29+ 的 per-network WifiInfo（双 STA 时区分主/次 WiFi；低版本无此机制） */
+    fun perNetworkWifiInfo(caps: NetworkCapabilities): android.net.wifi.WifiInfo? {
+        if (android.os.Build.VERSION.SDK_INT < 29) return null
+        return try {
+            caps.transportInfo as? android.net.wifi.WifiInfo
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /** 主 WiFi 条目直接镜像 currentInfoState（全部字段已解析好，避免重复逻辑） */
+    fun primaryEntryFromCurrent(cm: ConnectivityManager): NetworkEntry {
+        val info = currentInfoState
+        val handle = try {
+            cm.allNetworks.firstOrNull { n ->
+                try {
+                    cm.getNetworkCapabilities(n)
+                        ?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+                } catch (_: Exception) {
+                    false
+                }
+            }?.networkHandle ?: 0L
+        } catch (_: Exception) {
+            0L
+        }
+        return NetworkEntry(
+            isWifi = true, connected = info.connected,
+            handle = handle,
+            title = info.ssid, bssid = info.bssid,
+            validated = info.validated,
+            rssi = info.rssi, linkSpeedMbps = info.linkSpeedMbps,
+            frequencyMhz = info.frequencyMhz,
+            ipAddress = info.ipAddress, gateway = info.gateway,
+            dnsServers = info.dnsServers, dhcpServer = info.dhcpServer,
+            leaseDurationSec = info.leaseDurationSec
+        )
+    }
+
+    /**
+     * 枚举全部已连接网络（免权限 API）：
+     * - WiFi：TRANSPORT_WIFI + INTERNET，个别系统（双 STA）可同时多个；
+     *   主 WiFi 复用 [readCurrent] 已解析的身份/详情（SSID 特权解析、DHCP 兑底等），
+     *   其余 WiFi 经 per-network TransportInfo（API 29+）+ LinkProperties 读取；
+     * - 移动数据：TRANSPORT_CELLULAR + INTERNET。
+     * WiFi 未连接时补一张占位卡（如实展示「未连接」，而非隐藏整个区域）。
+     */
+    fun buildNetworkEntries(
+        cm: ConnectivityManager,
+        wifiConnected: Boolean,
+        primarySsid: String,
+        primaryNetId: Int,
+        carrier: String
+    ): List<NetworkEntry> {
+        val entries = mutableListOf<NetworkEntry>()
+
+        // 全部 WiFi 网络（带 INTERNET 能力位，排除 P2P/测试网络）
+        val wifiNets: List<Pair<Network, NetworkCapabilities>> = try {
+            cm.allNetworks.mapNotNull { n ->
+                try {
+                    val c = cm.getNetworkCapabilities(n)
+                    if (c != null &&
+                        c.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) &&
+                        c.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                    ) n to c else null
+                } catch (_: Exception) {
+                    null
+                }
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+
+        // 主 WiFi 判定（与 wm.connectionInfo 对齐）：netId 匹配 > SSID 匹配 > 第一个
+        val primaryIndex = wifiNets.indexOfFirst { (_, c) ->
+            val ti = perNetworkWifiInfo(c)
+            when {
+                primaryNetId >= 0 && ti != null ->
+                    try { ti.networkId == primaryNetId } catch (_: Exception) { false }
+                primarySsid.isNotEmpty() && ti != null ->
+                    ti.ssid?.removeSurrounding("\"") == primarySsid
+                else -> false
+            }
+        }.let { if (it >= 0) it else 0 }
+
+        if (wifiNets.isEmpty()) {
+            if (wifiConnected) {
+                // 连接中但能力位尚无 INTERNET（瞬时态）：仍以 currentInfo 展示主 WiFi
+                entries += primaryEntryFromCurrent(cm)
+            } else {
+                // WiFi 未连接占位卡（无分割线下方详情）
+                entries += NetworkEntry(isWifi = true, connected = false, handle = 0L, title = "")
+            }
+        } else {
+            wifiNets.forEachIndexed { idx, (net, caps) ->
+                val handle = try { net.networkHandle } catch (_: Exception) { 0L }
+                if (idx == primaryIndex) {
+                    // 主 WiFi：复用 currentInfo 的完整解析结果（身份/DHCP/验证结论）
+                    entries += primaryEntryFromCurrent(cm).copy(
+                        handle = handle,
+                        validated = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED),
+                        portal = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL)
+                    )
+                } else {
+                    // 次 WiFi（双 STA）：per-network TransportInfo + LinkProperties
+                    val ti = perNetworkWifiInfo(caps)
+                    val lp = try { cm.getLinkProperties(net) } catch (_: Exception) { null }
+                    val ssid = ti?.ssid?.removeSurrounding("\"")
+                        ?.takeIf { it.isNotEmpty() && it !in badSsids } ?: ""
+                    entries += NetworkEntry(
+                        isWifi = true, connected = true, handle = handle,
+                        title = ssid, bssid = try { ti?.bssid.orEmpty() } catch (_: Exception) { "" },
+                        validated = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED),
+                        portal = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL),
+                        rssi = try { ti?.rssi ?: -200 } catch (_: Exception) { -200 },
+                        linkSpeedMbps = try { ti?.linkSpeed ?: -1 } catch (_: Exception) { -1 },
+                        frequencyMhz = try { ti?.frequency ?: 0 } catch (_: Exception) { 0 },
+                        ipAddress = lp?.linkAddresses
+                            ?.firstOrNull { it.address is java.net.Inet4Address }
+                            ?.address?.hostAddress ?: "",
+                        gateway = lp?.routes?.firstNotNullOfOrNull { it.gateway?.hostAddress } ?: "",
+                        dnsServers = lp?.dnsServers?.mapNotNull { it.hostAddress } ?: emptyList()
+                    )
+                }
+            }
+        }
+
+        // 全部移动数据网络（一般 0 或 1 个，多卡场景如实全部列出）
+        val cellNets: List<Pair<Network, NetworkCapabilities>> = try {
+            cm.allNetworks.mapNotNull { n ->
+                try {
+                    val c = cm.getNetworkCapabilities(n)
+                    if (c != null &&
+                        c.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) &&
+                        c.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                    ) n to c else null
+                } catch (_: Exception) {
+                    null
+                }
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+        cellNets.forEach { (net, caps) ->
+            entries += NetworkEntry(
+                isWifi = false, connected = true,
+                handle = try { net.networkHandle } catch (_: Exception) { 0L },
+                title = carrier,
+                validated = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED),
+                portal = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL),
+                carrier = carrier,
+                roaming = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_ROAMING) != true
+            )
+        }
+        return entries
+    }
+
+    /**
+     * 连接成功后的认证网络（Captive Portal）检测：系统 NetworkMonitor
+     * 判定需网页认证会给网络打上 NET_CAPABILITY_CAPTIVE_PORTAL 能力位
+     * （即系统通知栏「登录到网络」的同一信号源）。连接后轮询约 16 秒：
+     * 命中 → [portalSsidState] 置为目标 SSID，UI 弹窗说明并引导跳系统
+     * WiFi 设置；期间网络已验证（正常网络）或断开则静默结束。
+     */
+    fun startPortalCheck(ssid: String) {
+        portalJob?.cancel()
+        portalJob = scope.launch {
+            try {
+                repeat(9) {
+                    delay(1800)
+                    val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE)
+                            as ConnectivityManager
+                    val caps = try {
+                        NetProber.findWifiNetwork(cm)
+                            ?.let { cm.getNetworkCapabilities(it) }
+                    } catch (_: Exception) {
+                        null
+                    } ?: return@launch          // WiFi 已断开
+                    if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL)) {
+                        portalSsidState = ssid
+                        return@launch
+                    }
+                    if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) {
+                        return@launch            // 正常可上网网络
+                    }
+                }
+            } catch (_: Exception) {
+            }
+        }
     }
 
     fun readCurrent() {
@@ -466,6 +705,11 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
             mobileRoaming = mobileCaps != null &&
                     mobileCaps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_ROAMING) != true,
             mobileCarrier = mobileCarrier
+        )
+
+        // ---- 网络页多网络列表：一卡一网，WiFi（可多个）+ 移动数据同时列出 ----
+        networkEntriesState = buildNetworkEntries(
+            cm, connected, quickSsid, quickNetId, mobileCarrier
         )
     }
 
@@ -662,6 +906,12 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
                         if (finalMsg != null) opMessageState = finalMsg
                         readCurrent()
                         performSaved()
+                        // 连接成功（目标已成当前网络）→ 异步检测认证网络，
+                        // 命中 NET_CAPABILITY_CAPTIVE_PORTAL 时弹窗说明并引导
+                        // 跳系统 WiFi 设置完成网页认证
+                        if (isCurrentNetwork(entry.ssid, entry.networkId)) {
+                            startPortalCheck(entry.ssid)
+                        }
                     }
                 }
             }
@@ -779,9 +1029,15 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
             override fun clearOpMessage() { opMessageState = null }
 
             override val currentInfo get() = currentInfoState
+            override val networkEntries get() = networkEntriesState
             override fun refreshCurrent() = readCurrent()
             override val diagnosing get() = diagnosingState
             override val diagnosisResults get() = diagnosisResultsState
+            override val portalSsid get() = portalSsidState
+            override fun clearPortalSsid() {
+                portalJob?.cancel()
+                portalSsidState = null
+            }
             override fun isCurrentNetwork(ssid: String, networkId: Int): Boolean {
                 val info = currentInfoState
                 if (!info.connected) return false

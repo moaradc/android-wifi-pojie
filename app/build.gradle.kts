@@ -28,8 +28,8 @@ android {
         minSdk = 24
         //noinspection ExpiredTargetSdkVersion 注:WifiManager需要
         targetSdk = 28
-        versionCode = 24
-        versionName = "v3.0.0_Alpha-25"
+        versionCode = 25
+        versionName = "v3.0.0_Alpha-26"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

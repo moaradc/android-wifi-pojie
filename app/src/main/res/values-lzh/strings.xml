@@ -135,6 +135,7 @@
     <string name="mgr_copied">已謄</string>
     <string name="mgr_password">密語</string>
     <string name="mgr_pwd_hidden">不可見（須 Root/Shizuku）</string>
+    <string name="mgr_pwd_open">開放之網，無需密語</string>
     <string name="mgr_connect">連之</string>
     <string name="mgr_forget">忘之</string>
     <string name="mgr_forget_confirm">將除系統所存「%1$s」之網，覆水難收</string>
@@ -178,6 +179,10 @@
     <string name="mgr_pwd_field_label">密語</string>
     <string name="mgr_pwd_empty">✗ 請先入密語</string>
     <string name="mgr_lbl_mobile">行動數據之網</string>
+    <string name="mgr_net_wifi">WiFi 之網</string>
+    <string name="mgr_portal_dialog_title">須網頁認證</string>
+    <string name="mgr_portal_dialog_msg">「%1$s」已通，然此網須網頁認證（登錄帳號／簡訊驗證碼之屬）方可上網。請往系統 WiFi 設定以成認證。</string>
+    <string name="mgr_portal_dialog_go">往系統 WiFi 設定</string>
     <string name="mgr_lbl_state">其狀</string>
     <string name="mgr_mobile_connected">已通</string>
     <string name="mgr_mobile_connected_validated">已通 · 已驗</string>
