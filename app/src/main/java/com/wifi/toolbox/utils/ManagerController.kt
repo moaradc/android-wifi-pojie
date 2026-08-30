@@ -68,8 +68,16 @@ data class CurrentNetworkInfo(
     val dnsServers: List<String>,
     val dhcpServer: String,
     val leaseDurationSec: Int,
-    val validated: Boolean              // 系统最近一次网络验证结论
+    val validated: Boolean,             // 系统最近一次网络验证结论（WiFi）
+    // ---- 移动数据网络（全部免权限 API：ConnectivityManager 能力位 + 运营商名） ----
+    val mobileConnected: Boolean = false,   // 蜂窝网络是否已连接（TRANSPORT_CELLULAR + INTERNET）
+    val mobileValidated: Boolean = false,   // 蜂窝系统验证结论（NET_CAPABILITY_VALIDATED）
+    val mobileRoaming: Boolean = false,     // 是否漫游（NET_CAPABILITY_NOT_ROAMING 取反）
+    val mobileCarrier: String = ""          // 运营商名（networkOperatorName 兜底 simOperatorName）
 )
+
+/** WifiInfo.getBSSID() 在定位服务关闭等场景返回的匿名化占位 MAC（非真实 BSSID） */
+const val ANONYMIZED_BSSID = "02:00:00:00:00:00"
 
 /** 通道名（UI 展示） */
 fun managerChannelName(channel: Int): String = when (channel) {
@@ -277,76 +285,85 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
         }
     }
 
+    /**
+     * 重读已保存列表（挂起版：供忘记网络后的轮询确认复用）。
+     *
+     * [silent] = true 时不切换 loading 状态（轮询期间反复闪转圈会打扰阅读），
+     * 仅更新列表内容。
+     */
     @android.annotation.SuppressLint("MissingPermission")
-    fun performSaved() {
-        scope.launch {
-            savedLoadingState = true
-            try {
-                val configs = mutableListOf<WifiConfiguration>()
-                var src = 0
-                for (ch in channelOrder()) {
-                    try {
-                        val r: List<WifiConfiguration> = when (ch) {
-                            1 -> ShizukuUtil.getSavedWifiList()
-                            2 -> AidlServiceHelper.getSavedWifiList(app)
-                            3 -> ApiUtil.getSavedWifiList(context)
-                            else -> emptyList()
-                        }
-                        if (r.isNotEmpty()) {
-                            configs.addAll(r)
-                            src = ch
-                            break
-                        }
-                    } catch (_: Exception) {
+    suspend fun performSavedNow(silent: Boolean) {
+        if (!silent) savedLoadingState = true
+        try {
+            val configs = mutableListOf<WifiConfiguration>()
+            var src = 0
+            for (ch in channelOrder()) {
+                try {
+                    val r: List<WifiConfiguration> = when (ch) {
+                        1 -> ShizukuUtil.getSavedWifiList()
+                        2 -> AidlServiceHelper.getSavedWifiList(app)
+                        3 -> ApiUtil.getSavedWifiList(context)
+                        else -> emptyList()
                     }
+                    if (r.isNotEmpty()) {
+                        configs.addAll(r)
+                        src = ch
+                        break
+                    }
+                } catch (_: Exception) {
                 }
-                savedSourceState = src
-                savedCache = configs.toList()
+            }
+            savedSourceState = src
+            savedCache = configs.toList()
 
-                // 破解成功记录（本地库，无任何权限要求）。
-                // 直读 StateFlow.value：compose 状态首帧可能尚未传播首次发射，
-                // 历史上导致破解记录偶发不显示。
-                val historyNow = app.pojieHistory.historyFlow.value
-                val cracked = historyNow.filter { !it.password.isNullOrEmpty() }
-                val entries = mutableListOf<SavedNetworkEntry>()
-                configs.forEach { cfg ->
-                    val ssid = cfg.SSID?.removeSurrounding("\"").orEmpty()
-                    if (ssid.isEmpty()) return@forEach
-                    val systemPwd = cfg.preSharedKey?.removeSurrounding("\"").orEmpty()
-                    val hist = cracked.find { it.ssid == ssid }
-                    val pwd = systemPwd.ifEmpty { hist?.password.orEmpty() }
+            // 破解成功记录（本地库，无任何权限要求）。
+            // 直读 StateFlow.value：compose 状态首帧可能尚未传播首次发射，
+            // 历史上导致破解记录偶发不显示。
+            val historyNow = app.pojieHistory.historyFlow.value
+            val cracked = historyNow.filter { !it.password.isNullOrEmpty() }
+            val entries = mutableListOf<SavedNetworkEntry>()
+            configs.forEach { cfg ->
+                val ssid = cfg.SSID?.removeSurrounding("\"").orEmpty()
+                if (ssid.isEmpty()) return@forEach
+                val systemPwd = cfg.preSharedKey?.removeSurrounding("\"").orEmpty()
+                val hist = cracked.find { it.ssid == ssid }
+                val pwd = systemPwd.ifEmpty { hist?.password.orEmpty() }
+                entries.add(
+                    SavedNetworkEntry(
+                        ssid = ssid,
+                        networkId = cfg.networkId,
+                        password = pwd,
+                        passwordFromPojie = systemPwd.isEmpty() && hist != null,
+                        fromSystem = true,
+                        hasPojieRecord = hist != null,
+                        pojieTime = hist?.lasttime ?: 0L
+                    )
+                )
+            }
+            cracked.forEach { h ->
+                if (entries.none { it.ssid == h.ssid }) {
                     entries.add(
                         SavedNetworkEntry(
-                            ssid = ssid,
-                            networkId = cfg.networkId,
-                            password = pwd,
-                            passwordFromPojie = systemPwd.isEmpty() && hist != null,
-                            fromSystem = true,
-                            hasPojieRecord = hist != null,
-                            pojieTime = hist?.lasttime ?: 0L
+                            ssid = h.ssid,
+                            networkId = -1,
+                            password = h.password.orEmpty(),
+                            passwordFromPojie = true,
+                            fromSystem = false,
+                            hasPojieRecord = true,
+                            pojieTime = h.lasttime
                         )
                     )
                 }
-                cracked.forEach { h ->
-                    if (entries.none { it.ssid == h.ssid }) {
-                        entries.add(
-                            SavedNetworkEntry(
-                                ssid = h.ssid,
-                                networkId = -1,
-                                password = h.password.orEmpty(),
-                                passwordFromPojie = true,
-                                fromSystem = false,
-                                hasPojieRecord = true,
-                                pojieTime = h.lasttime
-                            )
-                        )
-                    }
-                }
-                savedEntriesState = entries
-            } finally {
-                savedLoadingState = false
             }
+            savedEntriesState = entries
+        } finally {
+            if (!silent) savedLoadingState = false
         }
+    }
+
+    @android.annotation.SuppressLint("MissingPermission")
+    fun performSaved() {
+        scope.launch { performSavedNow(silent = false) }
     }
 
     fun readCurrent() {
@@ -408,6 +425,27 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
             if (dhcp != null && dhcp.dns2 != 0) add(intToIp(dhcp.dns2))
         }).distinct()
 
+        // ---- 移动数据网络（全部免权限 API，异常一律降级为空值不影响 WiFi 展示） ----
+        // 蜂窝 Network：TRANSPORT_CELLULAR + INTERNET 能力位（无需任何权限）
+        val mobileCaps = try {
+            cm.allNetworks.firstNotNullOfOrNull { n ->
+                try {
+                    cm.getNetworkCapabilities(n)?.takeIf {
+                        it.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) &&
+                                it.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                    }
+                } catch (_: Exception) { null }
+            }
+        } catch (_: Exception) { null }
+        // 运营商名：networkOperatorName（当前注册网络）优先，simOperatorName 兜底；
+        // 两者均无需 READ_PHONE_STATE，未插 SIM / 未注册时为空
+        val mobileCarrier = try {
+            val tm = context.getSystemService(Context.TELEPHONY_SERVICE)
+                    as? android.telephony.TelephonyManager
+            (tm?.networkOperatorName?.takeIf { it.isNotBlank() }
+                    ?: tm?.simOperatorName.orEmpty())
+        } catch (_: Exception) { "" }
+
         currentInfoState = CurrentNetworkInfo(
             connected = connected,
             ssid = quickSsid.ifEmpty { if (cacheValid) identitySsidState else "" },
@@ -421,7 +459,13 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
             dnsServers = dns,
             dhcpServer = if (dhcp != null && dhcp.serverAddress != 0) intToIp(dhcp.serverAddress) else "",
             leaseDurationSec = dhcp?.leaseDuration ?: 0,
-            validated = caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
+            validated = caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true,
+            mobileConnected = mobileCaps != null,
+            mobileValidated = mobileCaps
+                ?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true,
+            mobileRoaming = mobileCaps != null &&
+                    mobileCaps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_ROAMING) != true,
+            mobileCarrier = mobileCarrier
         )
     }
 
@@ -457,6 +501,16 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
                 scheduleLiveRefresh()
             }
         }
+        // 蜂窝独立回调实例（同一 NetworkCallback 对象不允许注册两个请求）
+        val cellularCallback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                scheduleLiveRefresh()
+            }
+
+            override fun onLost(network: Network) {
+                scheduleLiveRefresh()
+            }
+        }
         // targetSdk=28：系统广播注册无需 RECEIVER_EXPORTED/NOT_EXPORTED 标志
         @Suppress("UnspecifiedRegisterReceiverFlag")
         try {
@@ -467,11 +521,20 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
                     .build(),
                 networkCallback
             )
+            // 蜂窝网络回调：网络页移动数据行实时刷新（连接/断开/验证状态变化）
+            cm.registerNetworkCallback(
+                NetworkRequest.Builder()
+                    .addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR)
+                    .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                    .build(),
+                cellularCallback
+            )
         } catch (_: Exception) {
         }
         onDispose {
             try { context.unregisterReceiver(receiver) } catch (_: Exception) {}
             try { cm.unregisterNetworkCallback(networkCallback) } catch (_: Exception) {}
+            try { cm.unregisterNetworkCallback(cellularCallback) } catch (_: Exception) {}
         }
     }
 
@@ -572,6 +635,14 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
                                     1 -> ShizukuUtil.connectToWifi(entry.ssid, entry.password)
                                     2 -> AidlServiceHelper.connectToWifi(app, entry.ssid, entry.password)
                                     else -> ApiUtil.connectToWifiApi28(context, entry.ssid, entry.password)
+                                }
+
+                                // 未保存的开放网络：无需密码，三通道 connectToWifi
+                                // 空密码均构建 OPEN 配置（allowedKeyManagement 置位 0）
+                                entry.security == "OPEN" -> when (channel) {
+                                    1 -> ShizukuUtil.connectToWifi(entry.ssid, "")
+                                    2 -> AidlServiceHelper.connectToWifi(app, entry.ssid, "")
+                                    else -> ApiUtil.connectToWifiApi28(context, entry.ssid, "")
                                 }
 
                                 else -> {
@@ -685,7 +756,19 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
                     } catch (e: Exception) {
                         opMessageState = "✗ ${e.message}"
                     }
-                    performSaved()
+                    // 历史缺陷：系统侧删除是异步生效的，忘记后立即重读常仍读到旧
+                    // 配置，列表不更新（需切换页面才刷新）。轮询重读确认移除——
+                    // 目标 SSID 不再以「系统保存」身份出现即完成；同 SSID 若还有
+                    // 破解记录会保留为纯记录条目（按钮变为「删除记录」），属预期。
+                    // silent 轮询不闪 loading。最长约 4.2s。
+                    repeat(6) { attempt ->
+                        delay(if (attempt == 0) 500L else 700L)
+                        performSavedNow(silent = true)
+                        val stillThere = savedEntriesState.any {
+                            it.ssid == entry.ssid && it.fromSystem
+                        }
+                        if (!stillThere) return@launch
+                    }
                 }
             }
             override fun deletePojieRecord(ssid: String) {

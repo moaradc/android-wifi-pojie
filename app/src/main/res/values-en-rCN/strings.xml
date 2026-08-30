@@ -175,6 +175,19 @@
     <string name="mgr_connect_fail_request">✗ Connection request failed: %1$s</string>
     <string name="mgr_filter_empty">No networks match the current filter</string>
     <string name="mgr_filter_empty_tip">Try a different filter or sort order</string>
+    <string name="mgr_pwd_dialog_title">Link to %1$s</string>
+    <string name="mgr_pwd_field_label">Secret code</string>
+    <string name="mgr_pwd_empty">✗ Give secret code first</string>
+    <string name="mgr_lbl_mobile">Move net</string>
+    <string name="mgr_lbl_state">State</string>
+    <string name="mgr_mobile_connected">Linked</string>
+    <string name="mgr_mobile_connected_validated">Linked · Checked OK</string>
+    <string name="mgr_mobile_off">No link</string>
+    <string name="mgr_lbl_carrier">Net company</string>
+    <string name="mgr_lbl_roaming">Walk-net</string>
+    <string name="mgr_yes">Yes</string>
+    <string name="mgr_no">No</string>
+    <string name="mgr_bssid_hidden">BSSID hide by system (open place-find to see)</string>
     <string name="app">app</string>
     <string name="home">home</string>
     <string name="toolbox">tools</string>
@@ -224,7 +237,7 @@
     <string name="guard_probe_dns">DNS probe</string>
     <string name="guard_probe_dns_tip">Catches DNS hijack/black hole (204 OK but resolution fails)</string>
     <string name="guard_probe_icmp">ICMP ping probe</string>
-    <string name="guard_probe_icmp_tip">Runs ping bound to WiFi source IP; needs Shizuku/Root</string>
+    <string name="guard_probe_icmp_tip">Run ping with WiFi IP bind</string>
     <string name="guard_probe_validated">System VALIDATED bit</string>
     <string name="guard_probe_validated_tip">Reads the system\'s last validation verdict; free but not real-time</string>
     <string name="guard_probe_timeout">Probe timeout</string>
@@ -375,7 +388,7 @@
     <string name="guard_channel_heal">Heal</string>
     <string name="guard_channel_copied">Channel info copied</string>
     <string name="guard_notif_stopped">Guard not running — tap to start</string>
-    <string name="guard_channel_tip">Only healing and ICMP use privileged channels; HTTP/DNS/capability stay in-app</string>
+    <string name="guard_channel_tip">Only self-heal need big power; ICMP like big power but no power also OK; HTTP/DNS/capability use app self</string>
     <string name="guard_probe_copied">Probe result copied</string>
     <string name="guard_events_file_header">WiFi Toolbox — Network Guard event history</string>
     <string name="guard_events_copied">Copied %1$d events</string>

@@ -176,6 +176,19 @@
     <string name="mgr_connect_fail_request">✗ 连接请求失败：%1$s</string>
     <string name="mgr_filter_empty">当前筛选条件下没有网络</string>
     <string name="mgr_filter_empty_tip">试试切换筛选或排序条件</string>
+    <string name="mgr_pwd_dialog_title">连接「%1$s」</string>
+    <string name="mgr_pwd_field_label">密码</string>
+    <string name="mgr_pwd_empty">✗ 请输入密码</string>
+    <string name="mgr_lbl_mobile">移动数据网络</string>
+    <string name="mgr_lbl_state">状态</string>
+    <string name="mgr_mobile_connected">已连接</string>
+    <string name="mgr_mobile_connected_validated">已连接 · 已验证</string>
+    <string name="mgr_mobile_off">未连接</string>
+    <string name="mgr_lbl_carrier">运营商</string>
+    <string name="mgr_lbl_roaming">漫游</string>
+    <string name="mgr_yes">是</string>
+    <string name="mgr_no">否</string>
+    <string name="mgr_bssid_hidden">BSSID 已被系统隐藏（开启系统定位后可显示）</string>
     <string name="app">应用</string>
     <string name="home">主页</string>
     <string name="toolbox">工具箱</string>
@@ -226,7 +239,7 @@
     <string name="guard_probe_dns">DNS 解析探测</string>
     <string name="guard_probe_dns_tip">揪出 DNS 劫持/黑洞（204 通但解析失败时有效）</string>
     <string name="guard_probe_icmp">ICMP ping 探测</string>
-    <string name="guard_probe_icmp_tip">shell 执行 ping 并绑定 WiFi 源 IP，需 Shizuku/Root</string>
+    <string name="guard_probe_icmp_tip">shell 执行 ping 并绑定 WiFi 源 IP</string>
     <string name="guard_probe_validated">系统能力位（VALIDATED）</string>
     <string name="guard_probe_validated_tip">读系统最近一次验证结论，零开销但非实时</string>
     <string name="guard_probe_timeout">单次探测超时</string>
@@ -382,7 +395,7 @@
     <string name="guard_channel_heal">自愈</string>
     <string name="guard_channel_copied">已复制通道信息</string>
     <string name="guard_notif_stopped">守护未运行，点通知或「开启」启动</string>
-    <string name="guard_channel_tip">仅自愈与 ICMP 探测用特权通道；HTTP/DNS/能力位走应用层</string>
+    <string name="guard_channel_tip">仅自愈命令需要特权通道；ICMP 探测优先特权 shell，无特权时应用内直跑（普通应用可 ping）；HTTP/DNS/能力位走应用层</string>
     <string name="guard_probe_copied">已复制探测结果</string>
     <string name="guard_events_file_header">WiFi工具箱 网络守护事件历史</string>
     <string name="guard_events_copied">已复制 %1$d 条事件</string>

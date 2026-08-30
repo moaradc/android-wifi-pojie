@@ -1,10 +1,16 @@
 package com.wifi.toolbox.ui.screen
 
 import android.widget.Toast
-import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
@@ -23,6 +29,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -39,6 +46,7 @@ import com.wifi.toolbox.ToolboxApp
 import com.wifi.toolbox.structs.WifiInfo
 import com.wifi.toolbox.ui.items.NavContainer
 import com.wifi.toolbox.ui.items.NavPage
+import com.wifi.toolbox.ui.items.WifiIcon
 import kotlinx.coroutines.launch
 import com.wifi.toolbox.ui.items.TagItem
 import com.wifi.toolbox.ui.items.TagType
@@ -102,6 +110,10 @@ fun ManageScreen(onMenuClick: () -> Unit) {
 private fun ScanTabPage(controller: ManagerController, app: ToolboxApp) {
     val context = LocalContext.current
     var expandedSsid by rememberSaveable { mutableStateOf<String?>(null) }
+    // 未保存加密网络的连接密码输入对话框（目标 SSID 非空即弹出）
+    var pwdDialogSsid by rememberSaveable { mutableStateOf<String?>(null) }
+    var pwdDialogSec by rememberSaveable { mutableStateOf("") }
+    var pwdInput by rememberSaveable { mutableStateOf("") }
 
     // 进入页面自动扫一轮
     LaunchedEffect(Unit) { controller.refreshScan() }
@@ -112,6 +124,94 @@ private fun ScanTabPage(controller: ManagerController, app: ToolboxApp) {
             Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
             controller.clearOpMessage()
         }
+    }
+
+    // 扫描页卡片「连接」入口：已保存/留有破解密码/开放网络直接连接，
+    // 其余弹密码输入。连接成功后系统自动保存配置（无需重复保存）。
+    fun connectFromScan(wifi: WifiInfo) {
+        val cfg = wifi.savedInfo
+        val histPwd = wifi.pojieHistoryItem?.password
+        val sec = securitySummary(wifi.capabilities)
+        when {
+            // 系统已有配置（含密码不可见的 Android 10+ 场景）：networkId 直连
+            cfg != null -> controller.connectSaved(
+                SavedNetworkEntry(
+                    ssid = wifi.ssid,
+                    networkId = cfg.networkId,
+                    password = cfg.preSharedKey?.removeSurrounding("\"").orEmpty()
+                        .ifEmpty { histPwd.orEmpty() },
+                    passwordFromPojie = cfg.preSharedKey.isNullOrEmpty() && histPwd != null,
+                    fromSystem = true,
+                    security = sec
+                )
+            )
+
+            // 本应用破解记录留有密码：直接带密码连接
+            histPwd != null -> controller.connectSaved(
+                SavedNetworkEntry(
+                    ssid = wifi.ssid, networkId = -1, password = histPwd,
+                    passwordFromPojie = true, fromSystem = false, security = sec
+                )
+            )
+
+            // 开放网络：无需密码（connectSaved 按空密码 OPEN 配置直连）
+            sec == "OPEN" -> controller.connectSaved(
+                SavedNetworkEntry(
+                    ssid = wifi.ssid, networkId = -1, password = "",
+                    passwordFromPojie = false, fromSystem = false, security = sec
+                )
+            )
+
+            // 未保存加密网络：弹密码输入框
+            else -> {
+                pwdInput = ""
+                pwdDialogSec = sec
+                pwdDialogSsid = wifi.ssid
+            }
+        }
+    }
+
+    // 密码输入对话框（未保存的加密网络）
+    pwdDialogSsid?.let { ssid ->
+        AlertDialog(
+            onDismissRequest = { pwdDialogSsid = null },
+            title = { Text(stringResource(R.string.mgr_pwd_dialog_title, ssid)) },
+            text = {
+                OutlinedTextField(
+                    value = pwdInput,
+                    onValueChange = { pwdInput = it },
+                    label = { Text(stringResource(R.string.mgr_pwd_field_label)) },
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (pwdInput.isEmpty()) {
+                        Toast.makeText(
+                            context,
+                            context.getString(R.string.mgr_pwd_empty),
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    } else {
+                        controller.connectSaved(
+                            SavedNetworkEntry(
+                                ssid = ssid, networkId = -1, password = pwdInput,
+                                passwordFromPojie = false, fromSystem = false,
+                                security = pwdDialogSec
+                            )
+                        )
+                        pwdDialogSsid = null
+                    }
+                }) {
+                    Text(stringResource(R.string.mgr_connect))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pwdDialogSsid = null }) {
+                    Text(stringResource(R.string.btn_cancel))
+                }
+            }
+        )
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -195,9 +295,12 @@ private fun ScanTabPage(controller: ManagerController, app: ToolboxApp) {
                             wifi = wifi,
                             expanded = expandedSsid == wifi.ssid,
                             isCurrent = controller.isCurrentNetwork(wifi.ssid, -1),
+                            connecting = controller.connectingSsid == wifi.ssid,
+                            connectEnabled = controller.connectingSsid == null,
                             onToggle = {
                                 expandedSsid = if (expandedSsid == wifi.ssid) null else wifi.ssid
-                            }
+                            },
+                            onConnect = { connectFromScan(wifi) }
                         )
                     }
                 }
@@ -206,13 +309,7 @@ private fun ScanTabPage(controller: ManagerController, app: ToolboxApp) {
     }
 }
 
-/** 信号强度统一图标（颜色分级见 signalColor，避免依赖冷门图标变体） */
-
-private fun signalColor(level: Int): Color = when {
-    level >= -66 -> Color(0xFF2E7D32)
-    level >= -77 -> Color(0xFFF9A825)
-    else -> Color(0xFFC62828)
-}
+/** 信号强度标签（四档分界与 AOSP config_wifiRssiLevelThresholds 一致：[-88,-77,-66,-55]） */
 
 @Composable
 private fun signalLabel(level: Int): String = stringResource(
@@ -230,29 +327,31 @@ private fun ScanNetworkCard(
     wifi: WifiInfo,
     expanded: Boolean,
     isCurrent: Boolean,
-    onToggle: () -> Unit
+    connecting: Boolean,
+    connectEnabled: Boolean,
+    onToggle: () -> Unit,
+    onConnect: () -> Unit
 ) {
     val context = LocalContext.current
     val (band, channel) = freqToBandChannel(wifi.frequency)
 
+    // Card(onClick) 重载：水波纹自动裁剪到卡片圆角（此前 Modifier.clickable
+    // 的波纹是矩形/圆形外扩，与圆角卡片形状不符）
     Card(
+        onClick = onToggle,
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
             containerColor = if (isCurrent) MaterialTheme.colorScheme.primaryContainer
             else MaterialTheme.colorScheme.surfaceContainer
         ),
-        modifier = Modifier
-            .fillMaxWidth()
-            .animateContentSize()
-            .clickable { onToggle() }
+        modifier = Modifier.fillMaxWidth()
     ) {
         Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    Icons.Rounded.Wifi,
-                    contentDescription = null,
-                    tint = signalColor(wifi.level),
-                    modifier = Modifier.size(22.dp)
+                // 四格信号图标（与密码字典破解运行页同一组件同一分档算法）
+                WifiIcon(
+                    level = signalLevel(wifi.level),
+                    modifier = Modifier.size(24.dp)
                 )
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
@@ -293,39 +392,95 @@ private fun ScanNetworkCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+                // 展开指示箭头（点击后旋转 180°，提供可展开的视觉线索与即时反馈）
+                val chevronAngle by animateFloatAsState(
+                    targetValue = if (expanded) 180f else 0f,
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                        stiffness = Spring.StiffnessMedium
+                    ),
+                    label = "chevron"
+                )
+                Icon(
+                    Icons.Rounded.KeyboardArrowDown,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .size(22.dp)
+                        .rotate(chevronAngle)
+                )
             }
 
-            if (expanded) {
-                Spacer(Modifier.height(10.dp))
-                HorizontalDivider()
-                Spacer(Modifier.height(10.dp))
-                DetailRow("SSID", wifi.ssid)
-                DetailRow("BSSID", wifi.bssid)
-                DetailRow(stringResource(R.string.mgr_lbl_rssi), "${wifi.level} dBm")
-                if (wifi.frequency > 0) {
-                    DetailRow(
-                        stringResource(R.string.mgr_lbl_band),
-                        "${wifi.frequency} MHz · $band"
-                    )
-                    DetailRow(stringResource(R.string.mgr_lbl_channel), channel.toString())
-                }
-                DetailRow("Security", wifi.capabilities)
-                Spacer(Modifier.height(8.dp))
-                Row {
-                    SmallActionButton(
-                        icon = Icons.Outlined.ContentCopy,
-                        label = stringResource(R.string.mgr_copy) + " SSID",
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        copyText(context, wifi.ssid)
+            // 展开区：尺寸 + 淡入双重动画（替代此前无过渡的 if 直接拼入）
+            AnimatedVisibility(
+                visible = expanded,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                Column {
+                    Spacer(Modifier.height(10.dp))
+                    HorizontalDivider()
+                    Spacer(Modifier.height(10.dp))
+                    DetailRow("SSID", wifi.ssid)
+                    DetailRow("BSSID", wifi.bssid)
+                    DetailRow(stringResource(R.string.mgr_lbl_rssi), "${wifi.level} dBm")
+                    if (wifi.frequency > 0) {
+                        DetailRow(
+                            stringResource(R.string.mgr_lbl_band),
+                            "${wifi.frequency} MHz · $band"
+                        )
+                        DetailRow(stringResource(R.string.mgr_lbl_channel), channel.toString())
                     }
-                    Spacer(Modifier.width(8.dp))
-                    SmallActionButton(
-                        icon = Icons.Outlined.ContentCopy,
-                        label = stringResource(R.string.mgr_copy) + " BSSID",
-                        modifier = Modifier.weight(1f)
+                    DetailRow("Security", wifi.capabilities)
+                    Spacer(Modifier.height(10.dp))
+                    // 连接按钮：已保存/已留密码/开放网络直连，未保存加密网络弹密码输入；
+                    // 连接成功系统自动保存配置（无需再单独保存）
+                    Button(
+                        onClick = onConnect,
+                        enabled = connectEnabled,
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        copyText(context, wifi.bssid)
+                        if (connecting) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(14.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.onPrimary
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                stringResource(R.string.mgr_connecting_btn),
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                        } else {
+                            Icon(
+                                Icons.Rounded.Link,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                stringResource(R.string.mgr_connect),
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Row {
+                        SmallActionButton(
+                            icon = Icons.Outlined.ContentCopy,
+                            label = stringResource(R.string.mgr_copy) + " SSID",
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            copyText(context, wifi.ssid)
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        SmallActionButton(
+                            icon = Icons.Outlined.ContentCopy,
+                            label = stringResource(R.string.mgr_copy) + " BSSID",
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            copyText(context, wifi.bssid)
+                        }
                     }
                 }
             }
@@ -1111,9 +1266,14 @@ private fun NetworkTabPage(controller: ManagerController) {
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.SemiBold
                     )
+                    // 定位服务关闭等场景 WifiInfo.getBSSID() 返回匿名化占位 MAC
+                    // （02:00:00:00:00:00），并非真实 BSSID——如实提示而非展示假地址
                     if (info.bssid.isNotEmpty()) {
+                        val isAnonymized = info.bssid.equals(ANONYMIZED_BSSID, ignoreCase = true)
                         Text(
-                            text = info.bssid,
+                            text = if (isAnonymized)
+                                stringResource(R.string.mgr_bssid_hidden)
+                            else info.bssid,
                             style = MaterialTheme.typography.bodySmall,
                             fontFamily = FontFamily.Monospace,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1161,6 +1321,55 @@ private fun NetworkTabPage(controller: ManagerController) {
                         DetailRow(
                             stringResource(R.string.mgr_lbl_lease),
                             "${info.leaseDurationSec}s"
+                        )
+                    }
+
+                    // ---- 移动数据网络（免权限 API：连接状态/验证结论/运营商/漫游） ----
+                    Spacer(Modifier.height(12.dp))
+                    HorizontalDivider()
+                    Spacer(Modifier.height(10.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Rounded.SignalCellular4Bar,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = stringResource(R.string.mgr_lbl_mobile),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(Modifier.weight(1f))
+                        if (info.mobileConnected) {
+                            TagItem(
+                                if (info.mobileValidated) stringResource(R.string.mgr_validated)
+                                else stringResource(R.string.mgr_not_validated),
+                                if (info.mobileValidated) TagType.Primary else TagType.Tertiary
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    DetailRow(
+                        stringResource(R.string.mgr_lbl_state),
+                        if (info.mobileConnected)
+                            stringResource(
+                                if (info.mobileValidated) R.string.mgr_mobile_connected_validated
+                                else R.string.mgr_mobile_connected
+                            )
+                        else stringResource(R.string.mgr_mobile_off)
+                    )
+                    if (info.mobileCarrier.isNotEmpty()) {
+                        DetailRow(stringResource(R.string.mgr_lbl_carrier), info.mobileCarrier)
+                    }
+                    if (info.mobileConnected) {
+                        DetailRow(
+                            stringResource(R.string.mgr_lbl_roaming),
+                            stringResource(
+                                if (info.mobileRoaming) R.string.mgr_yes else R.string.mgr_no
+                            )
                         )
                     }
                 }

@@ -174,6 +174,19 @@
     <string name="mgr_connect_fail_request">✗ 求連而敗：%1$s</string>
     <string name="mgr_filter_empty">今擇之下無網</string>
     <string name="mgr_filter_empty_tip">試易擇序之法</string>
+    <string name="mgr_pwd_dialog_title">連「%1$s」</string>
+    <string name="mgr_pwd_field_label">密語</string>
+    <string name="mgr_pwd_empty">✗ 請先入密語</string>
+    <string name="mgr_lbl_mobile">行動數據之網</string>
+    <string name="mgr_lbl_state">其狀</string>
+    <string name="mgr_mobile_connected">已通</string>
+    <string name="mgr_mobile_connected_validated">已通 · 已驗</string>
+    <string name="mgr_mobile_off">未通</string>
+    <string name="mgr_lbl_carrier">行網之商</string>
+    <string name="mgr_lbl_roaming">漫游</string>
+    <string name="mgr_yes">然</string>
+    <string name="mgr_no">否</string>
+    <string name="mgr_bssid_hidden">BSSID 為系統所隱（啟定位方可示之）</string>
     <string name="app">此物</string>
     <string name="home">归处</string>
     <string name="toolbox">百宝箱</string>
@@ -223,7 +236,7 @@
     <string name="guard_probe_dns">DNS 解析探測</string>
     <string name="guard_probe_dns_tip">揪出 DNS 劫持/黑洞（204 通而解析敗時有效）</string>
     <string name="guard_probe_icmp">ICMP ping 探測</string>
-    <string name="guard_probe_icmp_tip">shell 執行 ping 並綁 WiFi 源 IP，需 Shizuku/Root</string>
+    <string name="guard_probe_icmp_tip">shell 執 ping 並綁 WiFi 源 IP</string>
     <string name="guard_probe_validated">系統能力位（VALIDATED）</string>
     <string name="guard_probe_validated_tip">讀系統最近一次驗證結論，零開銷而非即時</string>
     <string name="guard_probe_timeout">單次探測超時</string>
@@ -374,7 +387,7 @@
     <string name="guard_channel_heal">自癒</string>
     <string name="guard_channel_copied">已複製通道資訊</string>
     <string name="guard_notif_stopped">守護未運行，點通知或「開啟」以啓</string>
-    <string name="guard_channel_tip">唯自癒與 ICMP 探測用特權通道；HTTP/DNS/能力位行應用層</string>
+    <string name="guard_channel_tip">唯自癒之令需特權之道；ICMP 探測先取特權 shell，無特權則應用內自運（凡應皆可 ping）；HTTP/DNS/能力位行應用之層</string>
     <string name="guard_probe_copied">已複製探測結果</string>
     <string name="guard_events_file_header">WiFi工具箱 網路守護事件歷史</string>
     <string name="guard_events_copied">已複製 %1$d 條事件</string>
