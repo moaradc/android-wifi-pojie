@@ -15,14 +15,28 @@ import kotlinx.coroutines.withContext
  * 网络名就会在「WiFi 已连接」与「已连接 xxx」之间来回跳变。解析链：
  *
  * 1. 应用层 WifiInfo（免特权，最快，受定位限制）
- * 2. cmd wifi status（Android 11+，特权 shell 输出 Current network: #n "SSID"）
+ * 2. cmd wifi status（Android 11+，特权 shell）
  * 3. dumpsys wifi（通用兜底，mWifiInfo 行含 SSID 与 Net ID）
+ *
+ * 【输出格式依据 AOSP 源码（packages/modules/Wifi WifiShellCommand#printWifiInfo
+ * 与 ClientModeImpl#dump，Android 11~16 各版一致）】：
+ * - `Wifi is connected to "SSID"`（getSSID()：UTF-8 SSID 带双引号，
+ *    非 UTF-8 为十六进制串，未知为 <unknown ssid>）
+ * - `WifiInfo: SSID: "SSID", BSSID: ..., ..., Net ID: 12, ...`
+ * - dumpsys：`mWifiInfo SSID: "SSID", BSSID: ...`（SSID 可含逗号，须截到
+ *   `, BSSID:` 而非逗号）
+ * 特权 shell（Shizuku uid2000 / Root）持有 NETWORK_SETTINGS 权限，
+ * SSID 不受定位开关屏蔽（WifiServiceImpl#getConnectionInfo 对
+ * NETWORK_SETTINGS 持有者清除 REDACT 屏蔽）。
  *
  * 特权命令通道与 [WifiHealer] 同源（遵循设置「执行通道」，自动=Shizuku→
  * Root AIDL→本地 sh 逐级回退），但【不写】GuardState.lastShellChannel——
  * 该状态位仅用于守护页展示探测/自愈通道，UI 侧解析不应污染。
  */
 object WifiIdentity {
+
+    /** 无效占位：应用层/特权输出中被系统屏蔽的 SSID 标记 */
+    private val BAD_SSIDS = setOf("<unknown ssid>", "<none>", "unknown ssid", "0x")
 
     /** 解析当前 WiFi 身份：返回 (ssid, networkId)，ssid 为空串表示不可得 */
     suspend fun resolve(context: Context, app: ToolboxApp?): Pair<String, Int> {
@@ -33,37 +47,83 @@ object WifiIdentity {
             @Suppress("DEPRECATION")
             val info = wm.connectionInfo
             val raw = info?.ssid?.removeSurrounding("\"").orEmpty()
-            if (raw.isNotEmpty() && raw != "<unknown ssid>") ssid = raw
+            if (raw.isNotEmpty() && raw !in BAD_SSIDS) ssid = raw
             if (info != null) netId = info.networkId
         } catch (_: Exception) {
         }
         if (ssid.isEmpty() || netId == -1) {
             try {
-                // Android 11+：cmd wifi status 输出形如 Current network: #0 "SSID"
-                if (ssid.isEmpty()) {
+                // Android 11+：cmd wifi status（一次输出同时含 SSID 与 Net ID）
+                if (ssid.isEmpty() || netId == -1) {
                     val status = privilegedExec(context, app, "cmd wifi status")
-                    ssid = Regex("Current network:.*?\"([^\"]+)\"")
-                        .find(status)?.groupValues?.get(1)
-                        ?.removeSurrounding("\"")?.trim().orEmpty()
+                    parseStatusOutput(status).let { (s, n) ->
+                        if (ssid.isEmpty()) ssid = s
+                        if (netId == -1) netId = n
+                    }
                 }
                 if (ssid.isEmpty() || netId == -1) {
                     // 通用兜底：dumpsys wifi 的 mWifiInfo 行（含 SSID 与 Net ID）
                     val dump = privilegedExec(context, app, "dumpsys wifi")
-                    if (ssid.isEmpty()) {
-                        ssid = Regex("mWifiInfo SSID: ([^,\\r\\n]+)")
-                            .find(dump)?.groupValues?.get(1)
-                            ?.removeSurrounding("\"")?.trim().orEmpty()
-                        if (ssid == "<unknown ssid>") ssid = ""
-                    }
-                    if (netId == -1) {
-                        netId = Regex("mWifiInfo.*?Net ID: (\\d+)")
-                            .find(dump)?.groupValues?.get(1)?.toIntOrNull() ?: -1
+                    parseDumpsysOutput(dump).let { (s, n) ->
+                        if (ssid.isEmpty()) ssid = s
+                        if (netId == -1) netId = n
                     }
                 }
             } catch (_: Exception) {
             }
         }
         return ssid to netId
+    }
+
+    /**
+     * 解析 `cmd wifi status` 输出（AOSP WifiShellCommand#printWifiInfo）：
+     *   Wifi is connected to "MyWiFi"
+     *   WifiInfo: SSID: "MyWiFi", BSSID: aa:bb:cc:dd:ee:ff, ..., Net ID: 12, ...
+     * 未连接时输出 `Wifi is not connected`。
+     */
+    internal fun parseStatusOutput(output: String): Pair<String, Int> {
+        var ssid = ""
+        var netId = -1
+        // ① 主行：Wifi is connected to <getSSID()>（带引号/十六进制/unknown 三态）
+        Regex("Wifi is connected to (.+)")
+            .find(output)?.groupValues?.get(1)
+            ?.let { cleanSsid(it) }?.let { if (it.isNotEmpty()) ssid = it }
+        // ② WifiInfo 行兜底（SSID 与 Net ID 同行，SSID 可含逗号 → 截到 ", BSSID:"）
+        if (ssid.isEmpty()) {
+            Regex("WifiInfo: SSID: (.*?), BSSID:")
+                .find(output)?.groupValues?.get(1)
+                ?.let { cleanSsid(it) }?.let { if (it.isNotEmpty()) ssid = it }
+        }
+        netId = Regex("Net ID: (\\d+)")
+            .find(output)?.groupValues?.get(1)?.toIntOrNull() ?: -1
+        return ssid to netId
+    }
+
+    /**
+     * 解析 `dumpsys wifi` 输出（AOSP ClientModeImpl#dump）：
+     *   mWifiInfo SSID: "MyWiFi", BSSID: aa:bb:cc:dd:ee:ff, ..., Net ID: 12, ...
+     * 取第一条有效 mWifiInfo 行（多 ClientModeManager 场景下首个即主 STA）。
+     */
+    internal fun parseDumpsysOutput(output: String): Pair<String, Int> {
+        var ssid = ""
+        for (m in Regex("mWifiInfo SSID: (.*?), BSSID:").findAll(output)) {
+            val s = cleanSsid(m.groupValues[1])
+            if (s.isNotEmpty()) {
+                ssid = s
+                break
+            }
+        }
+        val netId = Regex("Net ID: (\\d+)")
+            .find(output)?.groupValues?.get(1)?.toIntOrNull() ?: -1
+        return ssid to netId
+    }
+
+    /** 清洗 SSID：去首尾引号/空白，过滤系统屏蔽占位（<unknown ssid> 等） */
+    private fun cleanSsid(raw: String): String {
+        val s = raw.trim().removeSurrounding("\"").trim()
+        // 非 UTF-8 SSID 为纯十六进制串（如 0a1b2c...），原样保留（系统设置同款行为）；
+        // 过滤系统屏蔽占位与空串
+        return if (s in BAD_SSIDS || s.isEmpty()) "" else s
     }
 
     /** 遵循设置「执行通道」执行特权命令（不污染 GuardState 通道展示状态） */

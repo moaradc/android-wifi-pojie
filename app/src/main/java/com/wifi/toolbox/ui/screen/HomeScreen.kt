@@ -71,6 +71,8 @@ import com.wifi.toolbox.ui.items.TagItem
 import com.wifi.toolbox.utils.WifiIdentity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.net.Inet4Address
 import java.net.NetworkInterface
@@ -84,16 +86,31 @@ data class NetworkState(
 
 /**
  * 首页 WiFi 网络名解析缓存（跨重组/多次网络回调保留）。
- * 网络名获取优先级：① 应用层 WifiInfo 直读（现版本方式，受定位开关限制）
- * → ② 同一网络（netId 一致）沿用已解析结果 → ③ 特权命令解析
- * （cmd wifi status → dumpsys wifi，遵循「执行通道」设置，不受定位限制，
- * 10 秒节流防高频网络回调刷命令）→ ④ 兜底显示「WiFi 已连接」。
- * ②③保证定位开关关闭时显示稳定，不在「已连接 xxx」与「WiFi 已连接」间跳变。
+ *
+ * 【会话级缓存】缓存的生命周期 = 本次 WiFi 连接会话：仅在 WiFi 断开时清空。
+ * 原因：Android 9+ 定位服务关闭时应用层 WifiInfo 被 WifiInfo.makeCopy 屏蔽，
+ * SSID 变 <unknown ssid> 且【networkId 同时变 -1】（AOSP 源码：
+ * mNetworkId = shouldRedactLocationSensitiveFields ? INVALID_NETWORK_ID : ...），
+ * 若缓存按 netId 匹配则永远命中不了，显示会在网名与「WiFi 已连接」间振荡。
+ *
+ * 解析优先级：① 应用层 WifiInfo 直读（现版本方式，受定位开关限制）
+ * → ② 会话级缓存沿用（同一 WiFi 连接内，不要求 netId 匹配）
+ * → ③ 特权命令解析（cmd wifi status → dumpsys wifi，遵循「执行通道」
+ * 设置，不受定位限制；缓存为空时尝试，10 秒节流）。
+ * 另：缓存超过 60 秒后允许后台刷新一次，覆盖「定位关闭期间切换了 WiFi」
+ * 的场景（此时 netId 被屏蔽无法检测换网）。
  */
 private object HomeWifiCache {
-    var ssid: String = ""
-    var netId: Int = -1
-    var lastShellTryAt: Long = 0L
+    @Volatile var ssid: String = ""
+    @Volatile var netId: Int = -1
+    @Volatile var lastShellTryAt: Long = 0L   // 特权命令解析节流（网络回调高频）
+    @Volatile var lastResolvedAt: Long = 0L   // 上次成功解析时刻（60s 过期刷新用）
+
+    fun clear() {
+        ssid = ""
+        netId = -1
+        lastResolvedAt = 0L
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -112,6 +129,8 @@ fun HomeScreen(onMenuClick: () -> Unit) {
 
     val networkState by produceState(initialValue = NetworkState(stringResource(R.string.not_connected))) {
         val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        // 串行化多次网络回调触发的刷新，防止慢的特权解析结果乱序回写 UI
+        val updateMutex = Mutex()
 
         suspend fun update() {
             val newState = withContext(Dispatchers.IO) {
@@ -132,24 +151,44 @@ fun HomeScreen(onMenuClick: () -> Unit) {
                         // ① 优先：应用层 WifiInfo 直读（现版本方式）
                         var resolved =
                             if (!rawSsid.isNullOrEmpty() && rawSsid != "<unknown ssid>") rawSsid else ""
-                        // ② 应用层拿不到（如定位服务关闭）：同一网络沿用已解析结果，
-                        //    避免 shell 节流窗口内显示来回跳变
-                        if (resolved.isEmpty() && netId >= 0 &&
-                            HomeWifiCache.netId == netId && HomeWifiCache.ssid.isNotEmpty()
-                        ) {
-                            resolved = HomeWifiCache.ssid
-                        }
-                        // ③ 仍拿不到：特权命令解析（不受定位限制，遵循「执行通道」），
-                        //    高频网络回调 10s 节流
-                        if (resolved.isEmpty() &&
-                            System.currentTimeMillis() - HomeWifiCache.lastShellTryAt > 10_000
-                        ) {
-                            HomeWifiCache.lastShellTryAt = System.currentTimeMillis()
-                            resolved = WifiIdentity.resolve(context.applicationContext, app).first
-                        }
                         if (resolved.isNotEmpty()) {
                             HomeWifiCache.ssid = resolved
                             HomeWifiCache.netId = netId
+                            HomeWifiCache.lastResolvedAt = System.currentTimeMillis()
+                        } else {
+                            // 换网检测：定位开启时 netId 可用，与缓存不一致即已切换网络，
+                            // 缓存作废重新解析（此时不走缓存沿用分支）
+                            if (netId >= 0 && HomeWifiCache.netId >= 0 &&
+                                HomeWifiCache.netId != netId
+                            ) {
+                                HomeWifiCache.clear()
+                            }
+                            // ② 会话级缓存沿用：不要求 netId 匹配（定位关闭时 netId 被
+                            // 屏蔽为 -1，按 netId 匹配会永远落空导致显示振荡）
+                            if (HomeWifiCache.ssid.isNotEmpty()) {
+                                resolved = HomeWifiCache.ssid
+                            }
+                            // ③ 特权命令解析：缓存为空时尝试（10s 节流）；
+                            // 或缓存超过 60s 后刷新一次（覆盖定位关闭期间换网）
+                            val now = System.currentTimeMillis()
+                            val cacheEmpty = HomeWifiCache.ssid.isEmpty()
+                            val cacheStale = !cacheEmpty &&
+                                now - HomeWifiCache.lastResolvedAt > 60_000
+                            if ((cacheEmpty || cacheStale) &&
+                                now - HomeWifiCache.lastShellTryAt > 10_000
+                            ) {
+                                HomeWifiCache.lastShellTryAt = now
+                                val (shellSsid, _) = WifiIdentity.resolve(
+                                    context.applicationContext, app
+                                )
+                                if (shellSsid.isNotEmpty()) {
+                                    // 命中（或换网刷新出新名）：更新缓存与显示
+                                    HomeWifiCache.ssid = shellSsid
+                                    HomeWifiCache.netId = netId
+                                    HomeWifiCache.lastResolvedAt = now
+                                    resolved = shellSsid
+                                }
+                            }
                         }
                         // ④ 兜底：显示「WiFi 已连接」；拿到则「已连接到 xxx」
                         ssid = if (resolved.isEmpty())
@@ -161,8 +200,7 @@ fun HomeScreen(onMenuClick: () -> Unit) {
                 }
                 // WiFi 已断开：清缓存，重连后按 ①→③ 重新解析（防残留旧网络名）
                 if (caps == null || !caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
-                    HomeWifiCache.ssid = ""
-                    HomeWifiCache.netId = -1
+                    HomeWifiCache.clear()
                 }
                 NetworkState(ssid, getAllIpAddresses(), isWifi)
             }
@@ -171,23 +209,23 @@ fun HomeScreen(onMenuClick: () -> Unit) {
 
         val callback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
-                launch { update() }
+                launch { updateMutex.withLock { update() } }
             }
 
             override fun onLost(network: Network) {
-                launch { update() }
+                launch { updateMutex.withLock { update() } }
             }
 
             override fun onCapabilitiesChanged(network: Network, c: NetworkCapabilities) {
-                launch { update() }
+                launch { updateMutex.withLock { update() } }
             }
 
             override fun onLinkPropertiesChanged(network: Network, l: LinkProperties) {
-                launch { update() }
+                launch { updateMutex.withLock { update() } }
             }
         }
 
-        update()
+        updateMutex.withLock { update() }
         cm.registerDefaultNetworkCallback(callback)
 
         awaitDispose {

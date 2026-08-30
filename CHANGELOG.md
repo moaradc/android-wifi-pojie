@@ -1,3 +1,10 @@
+# v3.0.0_Alpha-21
+
+- 修复：主页网络状态卡 cmd 特权解析从未生效——原解析的 `Current network:` 输出格式在 AOSP 中并不存在（考证 packages/modules/Wifi 源码 WifiShellCommand#printWifiInfo），真实格式为 `Wifi is connected to "SSID"` 与 `WifiInfo: SSID: …, Net ID: …`；现按 AOSP Android 11~16 真实输出重写解析（含 SSID 带引号/十六进制/被屏蔽三态、SSID 含逗号截取 `, BSSID:`、`Wifi is not connected` 不误匹配），12 组实测格式用例离线验证通过
+- 修复：网络名显示后回落「WiFi 已连接」的振荡——定位服务关闭时系统将 WifiInfo 的 networkId 一并屏蔽为 -1（AOSP：mNetworkId 随 REDACT_FOR_ACCESS_FINE_LOCATION 置 INVALID_NETWORK_ID），原缓存按 netId 匹配永远落空；现改为会话级缓存：同一次 WiFi 连接内不要求 netId 匹配、仅在断开时清空，定位关闭期间显示稳定不再跳变
+- 优化：定位关闭期间切换 WiFi 的检测——缓存超过 60 秒自动经特权通道刷新一次（netId 被屏蔽无法直接比对换网）；定位开启时 netId 不一致立即重解析；多次网络回调刷新串行化，防止慢的解析结果乱序回写
+- 说明：网络名获取优先级保持不变——应用层直读 → 缓存沿用 → 特权命令（cmd wifi status → dumpsys wifi，遵循「执行通道」）→ 兜底「WiFi 已连接」；移动数据等其它网络类型显示不变
+
 # v3.0.0_Alpha-20
 
 - 新增：主页网络状态卡网络名三级获取——优先应用层读取（现方式），拿不到时经「执行通道」特权命令解析（cmd wifi status → dumpsys wifi，不受定位开关限制；同一网络沿用已解析结果、命令调用 10 秒节流，显示稳定不跳变），仍拿不到兜底显示「WiFi 已连接」；移动数据等其它网络类型显示不变
