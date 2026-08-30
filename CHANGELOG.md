@@ -1,3 +1,12 @@
+# v3.0.0_Alpha-16
+
+- 修复：后台保活 Shizuku 通道恒显示 0/4——Shizuku 的 newProcess 是 exec 语义（不经 shell 解析），含 ";" 的回读校验脚本被按空格拆成参数（"whitelist;" 被当作 dumpsys 的普通参数），回读全部落空；现改为 sh -c 单次 shell 执行整段脚本（与 Root 的 su -c 同构），命令实际早已生效，仅校验误报
+- 修复：后台保活 FGS 项恒显示未生效——前台服务 appop 的正确名称是 START_FOREGROUND（AOSP AppOpsManager 定义，默认模式 allow），此前误写作 START_FOREGROUND_SERVICE（AOSP 从不存在该 op，set/get 均报 Unknown operation 静默失败）；RUN_ANY_IN_BACKGROUND / START_FOREGROUND 两项 op 仅 Android 9+ 存在，更早版本按"已放行"处理不再误报
+- 修复：「恢复默认」恒显示 1/4 未恢复——AOSP 行为：appops set <op> default 会删除该 op 的显式条目，之后 get 输出 "No operations." + "Default mode: allow"；恢复校验现把"无显式条目"判定为已恢复（此前只找 "OP: default" 行，必然找不到）；Doze 白名单判定同步兼容 Android 9+ 的 CSV 行格式（"user,com.foo,true"，原逐行等值匹配永不命中）；回读脚本改用 echo 分段标记，Doze 与三个 appop 各段独立解析
+- 优化：开启守护立即执行首轮检测（移除固定 3 秒等待；WiFi 未就绪由跳过分支与防抖阈值兜底），「立即检测」即时响应
+- 优化：自愈指数退避改为时间戳门槛，不再占用检测互斥锁——原实现在锁内 delay 最长 15 分钟，退避期间「立即检测」会被互斥锁卡住；现退避期间检测照常进行（每窗口仅记一次跳过日志），手动检测/网络恢复/自愈成功即复位退避
+- 调整：统计页「清零」按钮移至页面底部（远离大数字瓦片区），并增加二次确认弹窗（全部统计与事件历史清零不可恢复）
+
 # v3.0.0_Alpha-15
 
 - 新增：自动清理实时日志与事件历史——设置页「日志」分类新增「自动清理」（关闭 / 保留 1 / 3 / 7 / 30 天），超过保留天数的实时日志与事件历史自动删除；实时日志在检测轮次与状态页打开时清理，事件历史在记录新事件与统计页打开时清理（服务未运行也能清）

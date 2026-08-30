@@ -666,7 +666,7 @@ object ShizukuUtil {
 
 
     /**
-     * 执行命令
+     * 执行命令（单条命令，按空格拆 argv，exec 语义无 shell 解析）
      * @param command 命令文本
      * @param onOutputReceived 当接收到输出时的回调函数
      * @param onCommandFinished 当命令全部结束时的回调函数
@@ -674,6 +674,40 @@ object ShizukuUtil {
      */
     fun executeCommand(
         command: String,
+        onOutputReceived: Consumer<String>?,
+        onCommandFinished: Consumer<CommandRunner.CommandResult>?
+    ): Runnable = runProcessAsync(
+        CommandRunner.parseCommand(command),
+        onOutputReceived, onCommandFinished
+    )
+
+    /**
+     * 以单次 shell 脚本同步执行（sh -c）。
+     *
+     * Shizuku.newProcess 是 exec 语义：argv 直传、不经 shell 解析，
+     * 含 ";" 的复合脚本直接拆 argv 会把 "whitelist;" 当成普通参数传给命令
+     * （回读校验全部落空），必须经 ["sh", "-c", script] 执行。
+     */
+    fun executeScriptSync(script: String): CommandRunner.CommandResult {
+        val future = CompletableFuture<CommandRunner.CommandResult?>()
+
+        runProcessAsync(arrayOf("sh", "-c", script), null) { future.complete(it) }
+
+        return try {
+            future.get() ?: CommandRunner.CommandResult("", -1)
+        } catch (e: ExecutionException) {
+            throw RuntimeException(e)
+        } catch (e: InterruptedException) {
+            throw RuntimeException(e)
+        }
+    }
+
+    /**
+     * 进程执行内核：argv 直传 Shizuku.newProcess（远程 uid 2000 shell 进程），
+     * 异步收集 stdout+stderr 并在结束时回调
+     */
+    private fun runProcessAsync(
+        argv: Array<String>,
         onOutputReceived: Consumer<String>?,
         onCommandFinished: Consumer<CommandRunner.CommandResult>?
     ): Runnable {
@@ -694,9 +728,7 @@ object ShizukuUtil {
                 )
                 newProcessMethod.isAccessible = true
 
-                val cmd = CommandRunner.parseCommand(command)
-
-                val process = newProcessMethod.invoke(null, cmd, null, "/") as Process
+                val process = newProcessMethod.invoke(null, argv, null, "/") as Process
                 processHolder[0] = process
 
                 val inputStream = process.inputStream

@@ -73,6 +73,8 @@ class GuardService : Service() {
     private val healMutex = Mutex()          // 自愈互斥（事件触发与定时触发并发保护）
     private var consecutiveFails = 0         // 连续失败计数（防抖）
     private var consecutiveHealFails = 0     // 连续自愈失败计数（指数退避+熔断）
+    private var backoffUntilMs = 0L          // 指数退避截止时间（时间戳门槛，不再持锁 delay）
+    private var backoffSkipNotified = false  // 退避跳过提示已发（每个退避窗口仅记一次日志）
     private var lastEventLog = ""            // 最近一次事件触发的 action（去重）
     private var breakerNotified = false      // 熔断提示已发（防重复日志/通知）
     private var wakeLock: PowerManager.WakeLock? = null  // 后台保活：息屏 CPU 唤醒锁
@@ -163,8 +165,8 @@ class GuardService : Service() {
 
     private suspend fun guardLoop() {
         log(getString(R.string.guard_log_started, settings.checkIntervalSec))
-        // 启动先歇一小会儿，等系统网络就绪，避免开机瞬间的误判
-        delay(3000)
+        // 开启守护立即执行首轮检测（原固定 delay(3s) 造成“开启要等一会才真正开始”；
+        // WiFi 未就绪由 onlyWhenWifiConnected 跳过分支与防抖阈值兑底，不会误自愈）
         while (scope.isActive) {
             try {
                 runOneCheck()
@@ -193,10 +195,13 @@ class GuardService : Service() {
      */
     private suspend fun runOneCheck(manual: Boolean = false) = healMutex.withLock {
         if (manual) {
-            // 手动"立即检测" = 半开探测：复位熔断计数（用户明确希望立即再试一次）
+            // 手动"立即检测" = 半开探测：复位熔断计数与退避窗口
+            // （用户明确希望立即再试一次，不应被退避门槛拦住）
             if (consecutiveHealFails > 0) {
                 consecutiveHealFails = 0
                 breakerNotified = false
+                backoffUntilMs = 0L
+                backoffSkipNotified = false
             }
         }
         if (settings.onlyWhenWifiConnected) {
@@ -233,11 +238,13 @@ class GuardService : Service() {
             if (settings.verboseLogEnabled(GuardLog.LEVEL_INFO) || consecutiveFails > 0 || manual) {
                 log(getString(R.string.guard_log_online, detail), GuardLog.LEVEL_INFO)
             }
-            // 网络自行恢复（如路由器来电）：熔断计数与防抖计数一并复位
+            // 网络自行恢复（如路由器来电）：熔断计数、防抖计数与退避窗口一并复位
             // （旧版漏掉此处导致 consecutiveHealFails 永不复位、退避无限叠加）
             if (consecutiveHealFails > 0) {
                 consecutiveHealFails = 0
                 breakerNotified = false
+                backoffUntilMs = 0L
+                backoffSkipNotified = false
                 log(getString(R.string.guard_log_breaker_reset), GuardLog.LEVEL_HEAL)
             }
             consecutiveFails = 0
@@ -349,14 +356,21 @@ class GuardService : Service() {
             return
         }
 
-        // 指数退避：连续失败后成倍等待
-        if (consecutiveHealFails > 0) {
-            val backoff = settings.healCooldownBaseSec * 1000L *
-                    (1L shl minOf(consecutiveHealFails, settings.maxBackoffPower).coerceAtMost(16))
-            val capped = minOf(backoff, 15 * 60 * 1000L)
-            log(getString(R.string.guard_log_backoff, capped / 1000), GuardLog.LEVEL_HEAL)
-            delay(capped)
+        // 指数退避：连续失败后成倍等待（改为时间戳门槛，不占用 healMutex——
+        // 原实现在锁内 delay 最长 15 分钟，期间手动"立即检测"会被互斥锁卡住）
+        val now = System.currentTimeMillis()
+        if (backoffUntilMs > now) {
+            if (!backoffSkipNotified) {
+                backoffSkipNotified = true
+                log(
+                    getString(R.string.guard_log_backoff, (backoffUntilMs - now) / 1000),
+                    GuardLog.LEVEL_HEAL
+                )
+            }
+            GuardState.currentState = GuardState.STATE_HEAL_FAILED
+            return
         }
+        backoffSkipNotified = false
 
         val app = applicationContext as ToolboxApp
         // WiFi 身份获取：无定位权限时应用层 WifiInfo 拿不到真实 SSID，
@@ -397,6 +411,8 @@ class GuardService : Service() {
         if (recovered) {
             consecutiveHealFails = 0
             breakerNotified = false
+            backoffUntilMs = 0L
+            backoffSkipNotified = false
             consecutiveFails = 0
             GuardState.currentState = GuardState.STATE_ONLINE
             log(getString(R.string.guard_log_heal_ok, cost / 1000), GuardLog.LEVEL_HEAL)
@@ -405,8 +421,15 @@ class GuardService : Service() {
             }
         } else {
             consecutiveHealFails++
+            // 登记下一个退避窗口（时间戳门槛，performHeal 入口按此跳过等待）
+            val backoff = settings.healCooldownBaseSec * 1000L *
+                    (1L shl minOf(consecutiveHealFails, settings.maxBackoffPower).coerceAtMost(16))
+            val capped = minOf(backoff, 15 * 60 * 1000L)
+            backoffUntilMs = System.currentTimeMillis() + capped
+            backoffSkipNotified = false
             GuardState.currentState = GuardState.STATE_HEAL_FAILED
             log(getString(R.string.guard_log_heal_fail, consecutiveHealFails), GuardLog.LEVEL_ERROR)
+            log(getString(R.string.guard_log_backoff, capped / 1000), GuardLog.LEVEL_HEAL)
             if (settings.notifyOnHealFail) {
                 notifyEvent(getString(R.string.guard_notif_heal_fail_title), getString(R.string.guard_notif_heal_fail_text, ssid))
             }

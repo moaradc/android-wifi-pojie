@@ -1822,8 +1822,9 @@ private fun KeepAliveRow() {
                         }
                         rootResult = r
                         rootRunning = false
-                        // su 授权失败（无 Magisk/KernelSU 或已拒绝）：输出不含 appops 校验行
-                        if (!r.raw.contains("RUN_ANY_IN_BACKGROUND")) {
+                        // su 授权失败（无 Magisk/KernelSU 或已拒绝）：脚本未真正执行
+                        // （首段标记 ---DOZE--- 未出现在输出中）
+                        if (!r.raw.contains("---DOZE---")) {
                             toastMsg = context.getString(R.string.guard_keepalive_su_failed)
                         }
                     }
@@ -1848,7 +1849,7 @@ private fun KeepAliveRow() {
                     }
                     revertResult = r
                     revertRunning = false
-                    if (!viaShizuku && !r.raw.contains("RUN_ANY_IN_BACKGROUND")) {
+                    if (!viaShizuku && !r.raw.contains("---DOZE---")) {
                         toastMsg = context.getString(R.string.guard_keepalive_su_failed)
                     }
                 }
@@ -1984,22 +1985,8 @@ private fun StatsPage(app: ToolboxApp?, logDirUri: String) {
                 )
             }
         }
-        // 全部统计清零（事件历史卡有独立的"清空事件"按钮，仅清事件）
-        item {
-            Box(
-                modifier = Modifier.fillMaxWidth(),
-                contentAlignment = Alignment.Center
-            ) {
-                TextButton(
-                    onClick = { stats.reset() },
-                    contentPadding = PaddingValues(horizontal = 12.dp)
-                ) {
-                    Icon(Icons.Outlined.RestartAlt, null, Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text(stringResource(R.string.guard_stat_reset))
-                }
-            }
-        }
+        // 全部统计清零（移至页底，远离大数字瓦片误触区；
+        // 事件历史卡的"清空事件"按钮仅清事件，与此处的全部清零区分）
 
         // ---- 动作有效率卡（标题行含总成功率） ----
         if (stats.actionStats.isNotEmpty()) {
@@ -2011,6 +1998,44 @@ private fun StatsPage(app: ToolboxApp?, logDirUri: String) {
         // ---- 事件历史（单卡合并：标题 + 实时日志同款 5 按钮 + 卡内滚动列表） ----
         item {
             EventHistoryCard(stats, logDirUri)
+        }
+
+        // ---- 全部统计清零（页底，带二次确认） ----
+        item {
+            var showResetConfirm by remember { mutableStateOf(false) }
+            Box(
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                TextButton(
+                    onClick = { showResetConfirm = true },
+                    contentPadding = PaddingValues(horizontal = 12.dp)
+                ) {
+                    Icon(Icons.Outlined.RestartAlt, null, Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text(stringResource(R.string.guard_stat_reset))
+                }
+            }
+            if (showResetConfirm) {
+                AlertDialog(
+                    onDismissRequest = { showResetConfirm = false },
+                    title = { Text(stringResource(R.string.guard_stat_reset)) },
+                    text = { Text(stringResource(R.string.guard_stat_reset_confirm)) },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            stats.reset()
+                            showResetConfirm = false
+                        }) {
+                            Text(stringResource(R.string.guard_stat_reset))
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showResetConfirm = false }) {
+                            Text(stringResource(android.R.string.cancel))
+                        }
+                    }
+                )
+            }
         }
     }
 }

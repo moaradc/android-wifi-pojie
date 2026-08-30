@@ -223,6 +223,7 @@
     <string name="guard_stat_success_rate">自愈成功率 %1$d%%</string>
     <string name="guard_stat_events">事件历史</string>
     <string name="guard_stat_reset">清零</string>
+    <string name="guard_stat_reset_confirm">全部统计数据与事件历史将清零，且无法恢复。确定继续？</string>
 
     <string name="guard_log_started">守护启动，每 %1$ds 检测一次</string>
     <string name="guard_log_check_error">检测异常</string>

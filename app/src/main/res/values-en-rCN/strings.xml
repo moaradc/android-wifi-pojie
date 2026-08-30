@@ -217,6 +217,7 @@
     <string name="guard_stat_success_rate">Success rate %1$d%%</string>
     <string name="guard_stat_events">Event history</string>
     <string name="guard_stat_reset">Reset</string>
+    <string name="guard_stat_reset_confirm">All statistics and event history will be cleared and cannot be undone. Continue?</string>
     <string name="guard_log_started">Guard started, checking every %1$ds</string>
     <string name="guard_log_check_error">Check error</string>
     <string name="guard_log_online">Online ✓ %1$s</string>
