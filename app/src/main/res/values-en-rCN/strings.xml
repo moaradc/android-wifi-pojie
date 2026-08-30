@@ -566,9 +566,6 @@
     <string name="nav_manager">wifi boss</string>
     <string name="nav_test">lab</string>
     <string name="nav_settings">set</string>
-    <string name="tile_pojie">Crack</string>
-    <string name="tile_guard">Guard</string>
-    <string name="tile_manager">Manager</string>
     <string name="found_saved_password">find saved pass</string>
     <string name="found_saved_password_tip">system have this wifi info, link direct?</string>
     <string name="re_run">run again</string>

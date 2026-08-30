@@ -565,9 +565,6 @@
     <string name="nav_manager">WiFi Manager</string>
     <string name="nav_test">Lab</string>
     <string name="nav_settings">Settings</string>
-    <string name="tile_pojie">Crack</string>
-    <string name="tile_guard">Guard</string>
-    <string name="tile_manager">Manager</string>
     <string name="found_saved_password">Saved Config</string>
     <string name="found_saved_password_tip">WiFi config exists. Connect directly?</string>
     <string name="re_run">Rerun</string>

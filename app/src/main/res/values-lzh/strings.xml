@@ -565,9 +565,6 @@
     <string name="nav_manager">无线总管</string>
     <string name="nav_test">试炼场</string>
     <string name="nav_settings">陈设</string>
-    <string name="tile_pojie">破解</string>
-    <string name="tile_guard">守護</string>
-    <string name="tile_manager">總管</string>
     <string name="found_saved_password">觅得旧日密电</string>
     <string name="found_saved_password_tip">案卷已有此网密传，可欲径直投奔否？</string>
     <string name="re_run">重头再来</string>
