@@ -127,7 +127,6 @@
     <string name="guard_notif_action_stop">关闭</string>
     <string name="guard_notif_action_exit">结束</string>
     <string name="guard_cat_keepalive">后台保活</string>
-    <string name="guard_keepalive_tip">三级保活：系统级（唤醒锁+电池优化白名单）保证息屏后检测不中断；Shizuku/Root 一键命令加入 Doze 白名单并放开后台运行权限（国产 ROM 后台查杀的最强解法，重启后仍需重跑一次）</string>
     <string name="guard_keepalive_wakelock">息屏保持检测（唤醒锁）</string>
     <string name="guard_keepalive_wakelock_tip">持有 CPU 唤醒锁，息屏后检测照常运行（略增耗电，可关）</string>
     <string name="guard_keepalive_battery">电池优化白名单</string>
@@ -137,7 +136,6 @@
     <string name="guard_keepalive_root">Root 一键保活</string>
     <string name="guard_keepalive_running">执行中…</string>
     <string name="guard_keepalive_granted">Shizuku 已授权，请再次点击执行</string>
-    <string name="guard_keepalive_root_unavailable">Root 服务未连接，正在拉起授权…</string>
     <string name="guard_tab_status">状态</string>
     <string name="guard_tab_stats">统计</string>
     <string name="guard_service_running">守护运行中</string>
@@ -276,6 +274,10 @@
     <string name="guard_strategy_6">高成功率档：%1$s</string>
     <string name="guard_strategy_best_tip">当前优选动作：%1$s（按历史成功次数动态选取）</string>
     <string name="guard_custom_actions_tip">由轻到重执行，任一动作后恢复即停；未勾选时按标准档</string>
+    <string name="guard_custom_actions">自愈动作组合</string>
+    <string name="guard_custom_actions_value">已选 %1$d 项</string>
+    <string name="guard_custom_actions_none">未选择，按标准档执行</string>
+    <string name="guard_keepalive_su_failed">Root 授权失败：未安装 Magisk/KernelSU 或已拒绝授权</string>
     <string name="guard_action_reassociate">重协商（reassociate）</string>
     <string name="guard_action_reassociate_tip">802.11 链路重协商，不断链，速度最快（1-3s）</string>
     <string name="guard_action_reconnect">完整重连（reconnect）</string>
@@ -293,7 +295,6 @@
     <string name="guard_level_error">错误</string>
     <string name="guard_level_heal">自愈</string>
     <string name="guard_log_type">记录日志类型</string>
-    <string name="guard_log_type_tip">决定哪些级别写入实时日志（内存与保存文件）；与状态页的显示筛选互不影响</string>
     <string name="guard_log_type_none">不记录</string>
     <string name="guard_cat_log">日志</string>
     <string name="guard_log_dir">日志保存位置</string>
@@ -302,7 +303,6 @@
     <string name="guard_log_dir_invalid">自选文件夹已失效，保存时将回退应用私有目录</string>
     <string name="guard_log_dir_use_private">默认（应用私有目录）</string>
     <string name="guard_log_dir_pick">选择文件夹…（系统文件管理器）</string>
-    <string name="guard_log_dir_tip">默认存应用私有 log 目录（免权限，卸载即清）；自选文件夹的日志卸载后保留</string>
     <string name="guard_log_src_app">应用目录</string>
     <string name="guard_log_src_saf">自选目录</string>
     <string name="guard_channel_current_title">当前通道（点击收起）</string>

@@ -6,24 +6,30 @@ import android.content.Intent
 import android.net.Uri
 import android.os.PowerManager
 import android.provider.Settings
-import com.wifi.toolbox.ToolboxApp
 
 /**
- * 后台保活三级方案（网络调研验证的通行做法）：
+ * 后台保活三级方案（网络调研验证的通行做法：
+ * tweaselORG/appstraction、kiosk-satellite 等开源项目同样使用
+ * deviceidle whitelist + appops 组合）：
  *
  * 1. 系统级（应用自身能力，免特权）：
  *    - PARTIAL_WAKE_LOCK：息屏后 CPU 休眠会暂停协程定时器（delay 漂移），
  *      持有部分唤醒锁保证检测循环照常执行（由 GuardService 按 设置 开关管理）
  *    - 电池优化白名单：系统弹窗引导用户豁免（REQUEST_IGNORE_BATTERY_OPTIMIZATIONS）
  *
- * 2. Shizuku / Root（系统 shell 命令，效果最强）：
- *    - dumpsys deviceidle whitelist +<pkg>   Doze 白名单（写入 deviceidle.xml 持久化）
+ * 2. Shizuku（uid 2000 shell）：
+ *    - dumpsys deviceidle whitelist +<pkg>   Doze 白名单（写入 deviceidle.xml，重启持久）
  *    - cmd appops set <pkg> RUN_ANY_IN_BACKGROUND allow   后台运行权限（Android 9+，
  *      小米澎湃OS/MIUI 等国产 ROM 后台查杀的关键开关）
  *    - cmd appops set <pkg> RUN_IN_BACKGROUND allow       后台运行权限（Android 7+）
  *    - cmd appops set <pkg> START_FOREGROUND_SERVICE allow  前台服务启动权限（Android 9+）
  *
- * shell(uid 2000) 与 root 均有权限执行上述命令；执行后回读校验并逐项报告结果。
+ * 3. Root（独立通道，不依赖应用内 RootAIDL 服务）：
+ *    - 与 Shizuku 同一套命令，但直接 su -c 在同一 root shell 内一次跑完，
+ *      有 Magisk/KernelSU 授权即可，无需先拉起 Root 服务；
+ *      调研未发现 root 专属的额外保活命令（MIUI 自启动等为专有设置项，无公开命令）。
+ *
+ * 执行后回读校验并逐项报告结果；shell 与 root 均有权限执行上述命令。
  */
 object KeepAliveHelper {
 
@@ -66,23 +72,24 @@ object KeepAliveHelper {
         }
     }
 
-    /** Root AIDL 通道执行 */
-    suspend fun applyViaRoot(app: ToolboxApp, pkg: String): KeepAliveResult {
+    /**
+     * Root 直连通道：单条 su -c 在同一 root shell 内跑完全部命令与回读校验
+     * （Runtime.exec("su","-c",…) 经 Magisk/KernelSU 授权，无需 RootAIDL 服务）。
+     * 授权失败/无 su 时输出不含 appops 校验行，调用方据此提示。
+     */
+    suspend fun applyViaSu(pkg: String): KeepAliveResult {
+        // "设置命令; 回读校验" 全部拼进一条命令，单次 root shell 执行
+        val script = (cmds(pkg) + checkCmd(pkg)).joinToString("; ")
         val sb = StringBuilder()
-        for (cmd in cmds(pkg)) {
-            try {
-                val r = AidlServiceHelper.executeCommandSync(app, cmd)
-                sb.append(cmd).append(" -> exit=").append(r.exitCode).append('\n')
-            } catch (e: Exception) {
-                sb.append(cmd).append(" -> ").append(e.javaClass.simpleName).append('\n')
-            }
-        }
         return try {
-            val check = AidlServiceHelper.executeCommandSync(app, checkCmd(pkg))
-            sb.append(check.output.take(500))
-            parseCheck(check.output, pkg).copy(raw = sb.toString())
+            val r = CommandRunner.executeCommandSync(script, true)
+            sb.append("exit=").append(r.exitCode).append('\n')
+                .append(r.output.take(500))
+            parseCheck(r.output, pkg).copy(raw = sb.toString())
         } catch (e: Exception) {
-            sb.append("verify: ").append(e.javaClass.simpleName)
+            // 无 su 二进制（IOException）或被拒绝授权
+            sb.append(e.javaClass.simpleName).append(": ")
+                .append(e.message?.take(200))
             KeepAliveResult(false, false, false, false, sb.toString())
         }
     }

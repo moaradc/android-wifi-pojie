@@ -10,6 +10,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -871,6 +872,7 @@ private fun GuardSettingsPage(settings: MutableState<GuardSettings>, app: Toolbo
     var customIntervalText by remember { mutableStateOf(s.checkIntervalSec.toString()) }
     var showLogTypeDialog by remember { mutableStateOf(false) }
     var showLogDirDialog by remember { mutableStateOf(false) }
+    var showCustomActionsDialog by remember { mutableStateOf(false) }
 
     // 自定义档已选动作（LazyColumn 主体非 Composable，remember 需在函数体计算）
     val selectedActions = remember(s.customHealActions) {
@@ -1077,33 +1079,20 @@ private fun GuardSettingsPage(settings: MutableState<GuardSettings>, app: Toolbo
                     type = ListPreferenceType.DROPDOWN_MENU
                 )
             }
-            // ---- 自定义档：自选动作组合（仅在档位=5 时显示） ----
+            // ---- 自定义档：自选动作组合（弹窗选择，仅在档位=5 时显示） ----
             if (s.healStrategy == 5) {
                 item {
-                    BannerTip(
-                        text = stringResource(R.string.guard_custom_actions_tip),
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                    Preference(
+                        title = { Text(stringResource(R.string.guard_custom_actions)) },
+                        summary = {
+                            Text(
+                                if (selectedActions.isEmpty()) stringResource(R.string.guard_custom_actions_none)
+                                else stringResource(R.string.guard_custom_actions_value, selectedActions.size)
+                            )
+                        },
+                        icon = { Icon(Icons.Filled.Checklist, null) },
+                        onClick = { showCustomActionsDialog = true }
                     )
-                }
-                val selectedActionsRef = selectedActions
-                GuardSettings.CUSTOM_ACTION_IDS.forEach { actionId ->
-                    item {
-                        CheckboxPreference(
-                            value = actionId in selectedActions,
-                            onValueChange = { on ->
-                                val next = if (on) selectedActionsRef + actionId
-                                else selectedActionsRef - actionId
-                                // 按由轻到重固定顺序存储
-                                val ordered = GuardSettings.CUSTOM_ACTION_IDS
-                                    .filter { it in next }
-                                settings.value = s.copy(
-                                    customHealActions = ordered.joinToString(",")
-                                )
-                            },
-                            title = { Text(customActionLabel(actionId)) },
-                            summary = { Text(customActionTip(actionId)) }
-                        )
-                    }
                 }
             }
             // ---- 高成功率档当前优选信息 ----
@@ -1314,12 +1303,6 @@ private fun GuardSettingsPage(settings: MutableState<GuardSettings>, app: Toolbo
             // ---- 后台保活 ----
             item { PreferenceCategory(title = { Text(stringResource(R.string.guard_cat_keepalive)) }) }
             item {
-                BannerTip(
-                    text = stringResource(R.string.guard_keepalive_tip),
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
-                )
-            }
-            item {
                 SwitchPreference(
                     value = s.keepAliveWakeLock,
                     onValueChange = {
@@ -1406,12 +1389,6 @@ private fun GuardSettingsPage(settings: MutableState<GuardSettings>, app: Toolbo
                     onClick = { showLogDirDialog = true }
                 )
             }
-            item {
-                BannerTip(
-                    text = stringResource(R.string.guard_log_dir_tip),
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
-                )
-            }
         }
     }
 
@@ -1453,12 +1430,6 @@ private fun GuardSettingsPage(settings: MutableState<GuardSettings>, app: Toolbo
             title = { Text(stringResource(R.string.guard_log_type)) },
             text = {
                 Column {
-                    Text(
-                        stringResource(R.string.guard_log_type_tip),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(Modifier.height(8.dp))
                     val entries = listOf(
                         0 to stringResource(R.string.guard_level_info),
                         1 to stringResource(R.string.guard_level_warn),
@@ -1546,6 +1517,75 @@ private fun GuardSettingsPage(settings: MutableState<GuardSettings>, app: Toolbo
             }
         )
     }
+
+    // ---- 自定义档动作选择对话框（勾选列表，确认时按由轻到重固定顺序存储） ----
+    if (showCustomActionsDialog) {
+        var checked by remember { mutableStateOf(selectedActions) }
+        AlertDialog(
+            onDismissRequest = { showCustomActionsDialog = false },
+            title = { Text(stringResource(R.string.guard_custom_actions)) },
+            text = {
+                Column {
+                    Text(
+                        stringResource(R.string.guard_custom_actions_tip),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Column(
+                        modifier = Modifier
+                            .heightIn(max = 360.dp)
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        GuardSettings.CUSTOM_ACTION_IDS.forEach { actionId ->
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        checked = if (actionId in checked) checked - actionId
+                                        else checked + actionId
+                                    }
+                                    .padding(vertical = 4.dp)
+                            ) {
+                                Checkbox(
+                                    checked = actionId in checked,
+                                    onCheckedChange = { on ->
+                                        checked = if (on) checked + actionId
+                                        else checked - actionId
+                                    }
+                                )
+                                Column {
+                                    Text(
+                                        customActionLabel(actionId),
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                    Text(
+                                        customActionTip(actionId),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    // 按由轻到重固定顺序存储（planActions 执行顺序与显示一致）
+                    val ordered = GuardSettings.CUSTOM_ACTION_IDS.filter { it in checked }
+                    settings.value = s.copy(customHealActions = ordered.joinToString(","))
+                    showCustomActionsDialog = false
+                }) { Text(stringResource(R.string.btn_ok)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCustomActionsDialog = false }) {
+                    Text(stringResource(R.string.btn_cancel))
+                }
+            }
+        )
+    }
 }
 
 /** 自定义档动作 id → 本地化名称 */
@@ -1573,9 +1613,11 @@ private fun customActionTip(actionId: String): String = stringResource(
 )
 
 /**
- * Shizuku / Root 一键保活行：两个按钮分别经对应特权通道执行保活命令
- * （Doze 白名单 + 后台运行 appops + 前台服务 appops），执行后逐项展示结果。
- * 通道未授权/未连接时按钮置灰（Shizuku 未授权会先弹授权）。
+ * Shizuku / Root 一键保活行：
+ * - Shizuku 按钮经 uid 2000 shell 逐条执行保活命令；
+ * - Root 按钮直接 su -c 单次 shell 跑完全部命令（独立通道，不依赖应用内 RootAIDL
+ *   服务，有 Magisk/KernelSU 授权即可）；
+ * 命令含 Doze 白名单 + 后台运行 appops + 前台服务 appops，执行后逐项展示结果。
  */
 @Composable
 private fun KeepAliveRow() {
@@ -1638,26 +1680,17 @@ private fun KeepAliveRow() {
             }
             Button(
                 onClick = {
-                    val a = app
-                    val ready = a != null && try {
-                        a.aidl.ipc != null
-                    } catch (_: Exception) {
-                        false
-                    }
-                    if (a != null && ready) {
-                        rootRunning = true
-                        scope.launch {
-                            val r = withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                KeepAliveHelper.applyViaRoot(a, pkg)
-                            }
-                            rootResult = r
-                            rootRunning = false
+                    // 直接 su -c：无需 RootAIDL 服务，Magisk/KernelSU 授权即可
+                    rootRunning = true
+                    scope.launch {
+                        val r = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            KeepAliveHelper.applyViaSu(pkg)
                         }
-                    } else if (a != null) {
-                        toastMsg = context.getString(R.string.guard_keepalive_root_unavailable)
-                        try {
-                            a.aidl.startAIDLServiceRoot()
-                        } catch (_: Exception) {
+                        rootResult = r
+                        rootRunning = false
+                        // su 授权失败（无 Magisk/KernelSU 或已拒绝）：输出不含 appops 校验行
+                        if (!r.raw.contains("RUN_ANY_IN_BACKGROUND")) {
+                            toastMsg = context.getString(R.string.guard_keepalive_su_failed)
                         }
                     }
                 },

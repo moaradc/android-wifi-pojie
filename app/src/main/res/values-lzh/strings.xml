@@ -125,7 +125,6 @@
     <string name="guard_notif_action_stop">關閉</string>
     <string name="guard_notif_action_exit">結束</string>
     <string name="guard_cat_keepalive">後臺保活</string>
-    <string name="guard_keepalive_tip">三級保活：系統級（喚醒鎖+電池優化白名單）保息屏後檢測不輟；Shizuku/Root 一鍵命令入 Doze 白名單並縱後臺運行（國產 ROM 後臺查殺之上解，重啟後須再行一次）</string>
     <string name="guard_keepalive_wakelock">息屏恆檢（喚醒鎖）</string>
     <string name="guard_keepalive_wakelock_tip">持 CPU 喚醒鎖，息屏後檢測如常（微耗電，可關）</string>
     <string name="guard_keepalive_battery">電池優化白名單</string>
@@ -135,7 +134,6 @@
     <string name="guard_keepalive_root">Root 一鍵保活</string>
     <string name="guard_keepalive_running">執行中…</string>
     <string name="guard_keepalive_granted">Shizuku 已授權，請再點執行</string>
-    <string name="guard_keepalive_root_unavailable">Root 服務未連，正拉起授權…</string>
     <string name="guard_tab_status">狀態</string>
     <string name="guard_tab_stats">統計</string>
     <string name="guard_service_running">守護執行中</string>
@@ -268,6 +266,10 @@
     <string name="guard_strategy_6">高成功率檔：%1$s</string>
     <string name="guard_strategy_best_tip">當前優選動作：%1$s（按歷史成功次數動態選取）</string>
     <string name="guard_custom_actions_tip">由輕至重執行，任一動作後復即止；未勾選時依標準檔</string>
+    <string name="guard_custom_actions">自癒動作組</string>
+    <string name="guard_custom_actions_value">已擇 %1$d 項</string>
+    <string name="guard_custom_actions_none">未擇，依標準檔行</string>
+    <string name="guard_keepalive_su_failed">Root 授權失敗：未裝 Magisk/KernelSU 或已拒授權</string>
     <string name="guard_action_reassociate">重協商（reassociate）</string>
     <string name="guard_action_reassociate_tip">802.11 鏈路重協商，不斷鏈，速度最快（1-3s）</string>
     <string name="guard_action_reconnect">完整重連（reconnect）</string>
@@ -285,7 +287,6 @@
     <string name="guard_level_error">錯誤</string>
     <string name="guard_level_heal">自癒</string>
     <string name="guard_log_type">記錄日誌類型</string>
-    <string name="guard_log_type_tip">定何級寫入即時日誌（記憶與存檔）；與狀態頁之顯示篩選互不相涉</string>
     <string name="guard_log_type_none">不記錄</string>
     <string name="guard_cat_log">日誌</string>
     <string name="guard_log_dir">日誌儲存位置</string>
@@ -294,7 +295,6 @@
     <string name="guard_log_dir_invalid">自選資料夾已失效，儲存時將回退應用私有目錄</string>
     <string name="guard_log_dir_use_private">預設（應用私有目錄）</string>
     <string name="guard_log_dir_pick">選擇資料夾…（系統檔案管理器）</string>
-    <string name="guard_log_dir_tip">預設存應用私有 log 目錄（免權限，卸即清）；自擇資料夾之日誌卸後留存</string>
     <string name="guard_log_src_app">應用目錄</string>
     <string name="guard_log_src_saf">自選目錄</string>
     <string name="guard_channel_current_title">目前通道（點擊收起）</string>

@@ -126,7 +126,6 @@
     <string name="guard_notif_action_stop">Stop</string>
     <string name="guard_notif_action_exit">Exit</string>
     <string name="guard_cat_keepalive">Background keep-alive</string>
-    <string name="guard_keepalive_tip">Three levels: system (wake lock + battery-exemption) keeps checks running with screen off; Shizuku/Root one-tap commands add Doze whitelist and allow background running (strongest fix for OEM app killing; re-run once after reboot)</string>
     <string name="guard_keepalive_wakelock">Keep checking with screen off (wake lock)</string>
     <string name="guard_keepalive_wakelock_tip">Holds a CPU wake lock so checks continue with screen off (slight battery cost)</string>
     <string name="guard_keepalive_battery">Battery optimization exemption</string>
@@ -136,7 +135,6 @@
     <string name="guard_keepalive_root">Root keep-alive</string>
     <string name="guard_keepalive_running">Running…</string>
     <string name="guard_keepalive_granted">Shizuku granted — tap again to execute</string>
-    <string name="guard_keepalive_root_unavailable">Root service not connected, starting authorization…</string>
     <string name="guard_tab_status">Status</string>
     <string name="guard_tab_stats">Stats</string>
     <string name="guard_service_running">Guard running</string>
@@ -269,6 +267,10 @@
     <string name="guard_strategy_6">Best success: %1$s</string>
     <string name="guard_strategy_best_tip">Current best action: %1$s (picked by history success count)</string>
     <string name="guard_custom_actions_tip">Runs light to heavy, stops on recovery; defaults to Standard if none</string>
+    <string name="guard_custom_actions">Custom heal actions</string>
+    <string name="guard_custom_actions_value">%1$d selected</string>
+    <string name="guard_custom_actions_none">None selected, standard tier applies</string>
+    <string name="guard_keepalive_su_failed">Root authorization failed: Magisk/KernelSU missing or denied</string>
     <string name="guard_action_reassociate">Reassociate</string>
     <string name="guard_action_reassociate_tip">802.11 reassociation without leaving the link, fastest (1-3s)</string>
     <string name="guard_action_reconnect">Full reconnect</string>
@@ -286,7 +288,6 @@
     <string name="guard_level_error">Error</string>
     <string name="guard_level_heal">Healing</string>
     <string name="guard_log_type">Log types to record</string>
-    <string name="guard_log_type_tip">Which levels get written to the live log (memory and saved files); independent of the on-screen filter</string>
     <string name="guard_log_type_none">None</string>
     <string name="guard_cat_log">Logging</string>
     <string name="guard_log_dir">Log save location</string>
@@ -295,7 +296,6 @@
     <string name="guard_log_dir_invalid">Custom folder unavailable, saving falls back to the app-private directory</string>
     <string name="guard_log_dir_use_private">Default (app-private directory)</string>
     <string name="guard_log_dir_pick">Pick a folder… (system file manager)</string>
-    <string name="guard_log_dir_tip">Private log dir by default (no permission, cleared on uninstall); custom-folder logs survive uninstall</string>
     <string name="guard_log_src_app">App dir</string>
     <string name="guard_log_src_saf">Custom dir</string>
     <string name="guard_channel_current_title">Current channels (tap to collapse)</string>
