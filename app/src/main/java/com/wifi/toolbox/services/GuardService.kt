@@ -173,6 +173,10 @@ class GuardService : Service() {
             }
             // 每轮重新读设置，支持 UI 实时改间隔（不重启服务）
             reloadSettings()
+            // 自动清理实时日志（保留天数 > 0 时按时间过期；开销极小）
+            if (settings.autoCleanDays > 0) {
+                GuardState.pruneLogs(settings.autoCleanDays)
+            }
             val interval = settings.checkIntervalSec * 1000L
             // 分片睡眠：设置改小后能尽快生效，同时熄屏下不额外唤醒
             var slept = 0L
@@ -695,4 +699,18 @@ object GuardState {
     fun clearLogs() = logs.clear()
 
     fun logList(): List<GuardLogEntry> = logs
+
+    /**
+     * 自动清理实时日志：移除超过保留天数的日志条目。
+     * keepDays <= 0 时不动作；条目本身有 200 条上限，此处仅按时间过期。
+     * 触发点：检测轮次与状态页打开（服务未运行时 UI 也能清理）。
+     * @return 删除条数
+     */
+    fun pruneLogs(keepDays: Int): Int {
+        if (keepDays <= 0 || logs.isEmpty()) return 0
+        val cutoff = System.currentTimeMillis() - keepDays * 86_400_000L
+        val before = logs.size
+        logs.removeAll { it.time < cutoff }
+        return before - logs.size
+    }
 }

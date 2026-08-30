@@ -145,6 +145,7 @@
     <string name="guard_live_log">实时日志</string>
     <string name="guard_no_log">暂无日志</string>
     <string name="guard_last_check">上次检测: %1$s 前</string>
+    <string name="guard_probe_detail_title">检测详情</string>
     <string name="guard_state_online">网络正常</string>
     <string name="guard_state_suspect">疑似断网（防抖中）</string>
     <string name="guard_state_healing">正在自愈重连…</string>
@@ -219,6 +220,7 @@
     <string name="guard_stat_heals">重连次数</string>
     <string name="guard_stat_recovered">恢复成功</string>
     <string name="guard_stat_action_rate">自愈动作有效率</string>
+    <string name="guard_stat_success_rate">自愈成功率 %1$d%%</string>
     <string name="guard_stat_events">事件历史</string>
     <string name="guard_stat_reset">清零</string>
 
@@ -304,6 +306,9 @@
     <string name="guard_log_dir_invalid">自选文件夹已失效，保存时将回退应用私有目录</string>
     <string name="guard_log_dir_use_private">默认（应用私有目录）</string>
     <string name="guard_log_dir_pick">选择文件夹…（系统文件管理器）</string>
+    <string name="guard_auto_clean">自动清理</string>
+    <string name="guard_auto_clean_off">关闭</string>
+    <string name="guard_auto_clean_value">保留 %1$d 天</string>
     <string name="guard_log_src_app">应用目录</string>
     <string name="guard_log_src_saf">自选目录</string>
     <string name="guard_channel_current_title">当前通道（点击收起）</string>

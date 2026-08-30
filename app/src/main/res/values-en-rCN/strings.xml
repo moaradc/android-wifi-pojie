@@ -144,6 +144,7 @@
     <string name="guard_live_log">Live log</string>
     <string name="guard_no_log">No logs yet</string>
     <string name="guard_last_check">Last check: %1$s ago</string>
+    <string name="guard_probe_detail_title">Probe Details</string>
     <string name="guard_state_online">Network OK</string>
     <string name="guard_state_suspect">Offline suspected (debouncing)</string>
     <string name="guard_state_healing">Reconnecting…</string>
@@ -213,6 +214,7 @@
     <string name="guard_stat_heals">Reconnects</string>
     <string name="guard_stat_recovered">Recovered</string>
     <string name="guard_stat_action_rate">Action success rate</string>
+    <string name="guard_stat_success_rate">Success rate %1$d%%</string>
     <string name="guard_stat_events">Event history</string>
     <string name="guard_stat_reset">Reset</string>
     <string name="guard_log_started">Guard started, checking every %1$ds</string>
@@ -297,6 +299,9 @@
     <string name="guard_log_dir_invalid">Custom folder unavailable, saving falls back to the app-private directory</string>
     <string name="guard_log_dir_use_private">Default (app-private directory)</string>
     <string name="guard_log_dir_pick">Pick a folder… (system file manager)</string>
+    <string name="guard_auto_clean">Auto clean</string>
+    <string name="guard_auto_clean_off">Off</string>
+    <string name="guard_auto_clean_value">Keep for %1$d days</string>
     <string name="guard_log_src_app">App dir</string>
     <string name="guard_log_src_saf">Custom dir</string>
     <string name="guard_channel_current_title">Current channels (tap to collapse)</string>

@@ -35,7 +35,11 @@ data class GuardEvent(
  */
 class GuardStats(context: Context) {
 
-    private val prefs = context.getSharedPreferences("guard_stats", Context.MODE_PRIVATE)
+    private val appContext = context.applicationContext
+    private val prefs = appContext.getSharedPreferences("guard_stats", Context.MODE_PRIVATE)
+    private val settingsPrefs = appContext.getSharedPreferences(
+        GuardSettings.PREFS_NAME, Context.MODE_PRIVATE
+    )
 
     var totalChecks by mutableStateOf(0L)      // 总检测次数
         private set
@@ -52,6 +56,7 @@ class GuardStats(context: Context) {
     val actionStats = mutableStateMapOf<String, Pair<Int, Int>>()
     init {
         load()
+        autoPrune()
     }
 
     fun recordCheck(ok: Boolean) {
@@ -77,6 +82,7 @@ class GuardStats(context: Context) {
                 costMs = costMs
             )
         ) + events).take(MAX_EVENTS)
+        autoPrune()
         persist()
     }
 
@@ -94,6 +100,29 @@ class GuardStats(context: Context) {
     fun clearEvents() {
         events = emptyList()
         persist()
+    }
+
+    /**
+     * 自动清理：按设置的保留天数删除过期事件历史。
+     * 保留天数读自守护设置（settings_guard），0 = 关闭不动作。
+     * 触发点：初始化、每次记录新事件、统计页打开——无需服务运行也能清理。
+     * @return 删除条数（未开启返回 0）
+     */
+    fun autoPrune(): Int {
+        val keepDays = try {
+            settingsPrefs.getInt(
+                GuardSettings.AUTO_CLEAN_DAYS_KEY, GuardSettings.AUTO_CLEAN_DAYS_DEFAULT
+            )
+        } catch (_: Exception) {
+            0
+        }
+        if (keepDays <= 0 || events.isEmpty()) return 0
+        val cutoff = System.currentTimeMillis() - keepDays * 86_400_000L
+        val before = events.size
+        events = events.filter { it.time >= cutoff }
+        val removed = before - events.size
+        if (removed > 0) persist()
+        return removed
     }
 
     private fun persist() {

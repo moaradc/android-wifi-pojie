@@ -11,8 +11,11 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -24,6 +27,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -134,127 +138,157 @@ private fun StatusPage(settings: GuardSettings, app: ToolboxApp?) {
     }
 
     // 打开页面时同步常驻通知：服务未运行时按「常驻守护通知」开关
-    // 显示/移除"未运行"常驻通知（服务运行中的通知由前台服务管理）
-    LaunchedEffect(Unit) { GuardService.syncIdleNotification(context) }
+    // 显示/移除"未运行"常驻通知（服务运行中的通知由前台服务管理）；
+    // 同时按保留天数自动清理过期实时日志（服务未运行也能清）
+    LaunchedEffect(settings.autoCleanDays) {
+        GuardService.syncIdleNotification(context)
+        if (settings.autoCleanDays > 0) GuardState.pruneLogs(settings.autoCleanDays)
+    }
+
+    val shellChannel = GuardState.lastShellChannel
+    val healChannel = GuardState.lastHealChannel
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(vertical = 8.dp)
     ) {
+        // ---- Hero 状态卡（Apple 系统状态页风格：大图标 + 一句话结论）----
+        item { HeroStatusCard(state, lastCheck, nowMs) }
+
+        // ---- 控制卡（iOS 分组列表风格：开关行 + 居中动作行）----
         item {
-            // ---- 总开关 ----
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp, vertical = 4.dp),
+                shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(
-                    containerColor = if (running)
-                        MaterialTheme.colorScheme.primaryContainer
-                    else MaterialTheme.colorScheme.surfaceVariant
+                    containerColor = MaterialTheme.colorScheme.surfaceContainer
                 )
             ) {
-                Row(
+                Column {
+                    // 守护开关行
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                text = stringResource(
+                                    if (running) R.string.guard_service_running
+                                    else R.string.guard_service_stopped
+                                ),
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = stringResource(
+                                    R.string.guard_interval_now, settings.checkIntervalSec
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = running,
+                            onCheckedChange = { on ->
+                                if (on) {
+                                    GuardService.start(context)
+                                } else {
+                                    GuardService.stop(context)
+                                }
+                            }
+                        )
+                    }
+                    HorizontalDivider(
+                        modifier = Modifier.padding(start = 16.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                    )
+                    // 立即检测行（iOS 分组列表动作行样式：居中主色文字）
+                    val actionColor = if (running) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(enabled = running) {
+                                try {
+                                    context.startService(
+                                        android.content.Intent(
+                                            context, GuardService::class.java
+                                        ).apply { action = GuardService.ACTION_RUN_CHECK }
+                                    )
+                                } catch (_: Exception) {
+                                }
+                            }
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Filled.PlayArrow, null,
+                            Modifier.size(18.dp), tint = actionColor
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            stringResource(R.string.guard_check_now),
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = actionColor
+                        )
+                    }
+                }
+            }
+        }
+
+        // ---- 检测详情卡（分组行 + hairline 分隔线；保留展开/长按复制交互）----
+        if (lastVerdict != null || shellChannel.isNotEmpty() || healChannel.isNotEmpty()) {
+            item {
+                Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainer
+                    )
                 ) {
-                    Column(Modifier.weight(1f)) {
+                    Column(Modifier.padding(vertical = 10.dp)) {
                         Text(
-                            text = stringResource(
-                                if (running) R.string.guard_service_running
-                                else R.string.guard_service_stopped
-                            ),
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold
+                            stringResource(R.string.guard_probe_detail_title),
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier
+                                .padding(horizontal = 16.dp)
+                                .padding(bottom = 4.dp)
                         )
-                        Text(
-                            text = stringResource(
-                                R.string.guard_interval_now, settings.checkIntervalSec
-                            ),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Switch(
-                        checked = running,
-                        onCheckedChange = { on ->
-                            if (on) {
-                                GuardService.start(context)
-                            } else {
-                                GuardService.stop(context)
+                        // 执行通道行（点击展开/收起，长按复制）
+                        if (shellChannel.isNotEmpty() || healChannel.isNotEmpty()) {
+                            Column(Modifier.padding(horizontal = 16.dp)) {
+                                ChannelLine(shellChannel, healChannel)
+                            }
+                            HorizontalDivider(
+                                modifier = Modifier.padding(start = 16.dp, top = 4.dp),
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                            )
+                        }
+                        // 探测结果行（状态圆点 + 单行截断，点击展开）
+                        lastVerdict?.let { v ->
+                            v.results.forEachIndexed { i, r ->
+                                Column(Modifier.padding(horizontal = 16.dp)) {
+                                    ProbeResultLine(r)
+                                }
+                                if (i < v.results.lastIndex) {
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(start = 16.dp),
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                                    )
+                                }
                             }
                         }
-                    )
-                }
-            }
-        }
-
-        item {
-            // ---- 当前状态卡 ----
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 4.dp)
-            ) {
-                Column(Modifier.padding(16.dp)) {
-                    val (label, color) = stateLabel(state)
-                    Text(
-                        text = label,
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = color
-                    )
-                    if (lastCheck > 0) {
-                        val ago = (nowMs - lastCheck) / 1000
-                        Text(
-                            text = stringResource(
-                                R.string.guard_last_check,
-                                formatAgo(ago)
-                            ),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-
-                    // ---- 通道可见性：默认单行截断，点击动画展开全部，长按复制 ----
-                    val shellChannel = GuardState.lastShellChannel
-                    val healChannel = GuardState.lastHealChannel
-                    if (shellChannel.isNotEmpty() || healChannel.isNotEmpty()) {
-                        ChannelLine(shellChannel, healChannel)
-                    }
-
-                    lastVerdict?.let { v ->
-                        Spacer(Modifier.height(8.dp))
-                        v.results.forEach { r ->
-                            ProbeResultLine(r)
-                        }
                     }
                 }
-            }
-        }
-
-        item {
-            // ---- 立即检测按钮 ----
-            Button(
-                onClick = {
-                    try {
-                        context.startService(
-                            android.content.Intent(
-                                context, GuardService::class.java
-                            ).apply { action = GuardService.ACTION_RUN_CHECK }
-                        )
-                    } catch (_: Exception) {
-                    }
-                },
-                enabled = running,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 4.dp)
-            ) {
-                Icon(Icons.Filled.PlayArrow, null, Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text(stringResource(R.string.guard_check_now))
             }
         }
 
@@ -265,23 +299,93 @@ private fun StatusPage(settings: GuardSettings, app: ToolboxApp?) {
     }
 }
 
+/** 状态视觉三元组：本地化标签 + 语义色 + 图标（Apple 系统状态页式大图标） */
+private data class StateVisual(val label: String, val color: Color, val icon: ImageVector)
+
 @Composable
-private fun stateLabel(state: String): Pair<String, Color> {
+private fun stateVisual(state: String): StateVisual {
     return when (state) {
-        GuardState.STATE_ONLINE ->
-            stringResource(R.string.guard_state_online) to MaterialTheme.colorScheme.primary
-        GuardState.STATE_SUSPECT ->
-            stringResource(R.string.guard_state_suspect) to MaterialTheme.colorScheme.tertiary
-        GuardState.STATE_HEALING ->
-            stringResource(R.string.guard_state_healing) to MaterialTheme.colorScheme.tertiary
-        GuardState.STATE_HEAL_FAILED ->
-            stringResource(R.string.guard_state_heal_failed) to MaterialTheme.colorScheme.error
-        GuardState.STATE_PORTAL ->
-            stringResource(R.string.guard_state_portal) to MaterialTheme.colorScheme.error
-        GuardState.STATE_LINK_DOWN ->
-            stringResource(R.string.guard_state_link_down) to MaterialTheme.colorScheme.onSurfaceVariant
-        else ->
-            stringResource(R.string.guard_state_idle) to MaterialTheme.colorScheme.onSurfaceVariant
+        GuardState.STATE_ONLINE -> StateVisual(
+            stringResource(R.string.guard_state_online),
+            MaterialTheme.colorScheme.primary, Icons.Filled.Wifi
+        )
+        GuardState.STATE_SUSPECT -> StateVisual(
+            stringResource(R.string.guard_state_suspect),
+            MaterialTheme.colorScheme.tertiary, Icons.Filled.WifiFind
+        )
+        GuardState.STATE_HEALING -> StateVisual(
+            stringResource(R.string.guard_state_healing),
+            MaterialTheme.colorScheme.tertiary, Icons.Filled.Autorenew
+        )
+        GuardState.STATE_HEAL_FAILED -> StateVisual(
+            stringResource(R.string.guard_state_heal_failed),
+            MaterialTheme.colorScheme.error, Icons.Filled.WifiOff
+        )
+        GuardState.STATE_PORTAL -> StateVisual(
+            stringResource(R.string.guard_state_portal),
+            MaterialTheme.colorScheme.error, Icons.Filled.VpnLock
+        )
+        GuardState.STATE_LINK_DOWN -> StateVisual(
+            stringResource(R.string.guard_state_link_down),
+            MaterialTheme.colorScheme.onSurfaceVariant, Icons.Filled.WifiOff
+        )
+        else -> StateVisual(
+            stringResource(R.string.guard_state_idle),
+            MaterialTheme.colorScheme.onSurfaceVariant, Icons.Filled.MonitorHeart
+        )
+    }
+}
+
+/**
+ * Hero 状态卡（参考 Apple 系统状态页"All services are operating normally"模式）：
+ * 居中大圆角图标 + 大号状态结论 + 上次检测时间，随状态整体着色。
+ */
+@Composable
+private fun HeroStatusCard(state: String, lastCheckMs: Long, nowMs: Long) {
+    val (label, color, icon) = stateVisual(state)
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = color.copy(alpha = 0.10f)
+        )
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(vertical = 28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(72.dp)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(color.copy(alpha = 0.16f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(icon, null, Modifier.size(36.dp), tint = color)
+            }
+            Spacer(Modifier.height(14.dp))
+            Text(
+                text = label,
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+                color = color
+            )
+            if (lastCheckMs > 0) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = stringResource(
+                        R.string.guard_last_check,
+                        formatAgo((nowMs - lastCheckMs) / 1000)
+                    ),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
     }
 }
 
@@ -414,18 +518,26 @@ private fun ProbeResultLine(result: ProbeResult) {
                     ).show()
                 }
             )
-            .padding(vertical = 1.dp)
+            .padding(vertical = 6.dp)
     ) {
         if (expanded) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+                verticalAlignment = Alignment.CenterVertically
             ) {
+                Box(
+                    Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(statusColor)
+                )
+                Spacer(Modifier.width(8.dp))
                 Text(
                     result.mode,
                     style = MaterialTheme.typography.bodyMedium,
                     fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Medium
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.weight(1f)
                 )
                 Text(
                     mark,
@@ -444,13 +556,24 @@ private fun ProbeResultLine(result: ProbeResult) {
         } else {
             Row(
                 modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text(
-                    result.mode,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontFamily = FontFamily.Monospace
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // 状态圆点（Apple 系统状态页式绿点/红点）
+                    Box(
+                        Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(statusColor)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        result.mode,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
                 Text(
                     "$mark ${result.detail}",
                     style = MaterialTheme.typography.bodyMedium,
@@ -544,7 +667,11 @@ private fun LiveLogCard(context: Context, logDirUri: String) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer
+        )
     ) {
         Column(Modifier.padding(12.dp)) {
             // ---- 标题 + 操作按钮行 ----
@@ -1359,6 +1486,34 @@ private fun GuardSettingsPage(settings: MutableState<GuardSettings>, app: Toolbo
                     onClick = { showLogDirDialog = true }
                 )
             }
+            item {
+                // 自动清理：超过保留天数的实时日志与事件历史自动删除
+                // （实时日志在检测轮次与状态页打开时清理，事件在记录与统计页打开时清理）
+                val presets = GuardSettings.AUTO_CLEAN_PRESETS
+                val idx = presets.indexOf(s.autoCleanDays).let { if (it >= 0) it else 0 }
+                ListPreference(
+                    value = idx,
+                    onValueChange = { i ->
+                        settings.value = s.copy(autoCleanDays = presets[i])
+                    },
+                    title = { Text(stringResource(R.string.guard_auto_clean)) },
+                    summary = {
+                        Text(
+                            if (s.autoCleanDays <= 0) stringResource(R.string.guard_auto_clean_off)
+                            else stringResource(R.string.guard_auto_clean_value, s.autoCleanDays)
+                        )
+                    },
+                    icon = { Icon(Icons.Filled.AutoDelete, null) },
+                    values = presets.indices.toList(),
+                    valueToText = { i: Int ->
+                        AnnotatedString(
+                            if (presets[i] <= 0) context.getString(R.string.guard_auto_clean_off)
+                            else context.getString(R.string.guard_auto_clean_value, presets[i])
+                        )
+                    },
+                    type = ListPreferenceType.DROPDOWN_MENU
+                )
+            }
         }
     }
 
@@ -1770,8 +1925,11 @@ private fun toggleMask(current: Int, bit: Int, on: Boolean): Int =
 private fun StatsPage(app: ToolboxApp?, logDirUri: String) {
     val stats = app?.guardStats
     var refreshKey by remember { mutableIntStateOf(0) }
-    // 打开统计页时拉一次最新数据
-    LaunchedEffect(Unit) { refreshKey++ }
+    // 打开统计页时拉一次最新数据 + 自动清理过期事件（服务未运行也能清）
+    LaunchedEffect(Unit) {
+        stats?.autoPrune()
+        refreshKey++
+    }
 
     if (stats == null) return
 
@@ -1779,21 +1937,26 @@ private fun StatsPage(app: ToolboxApp?, logDirUri: String) {
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(vertical = 8.dp)
     ) {
+        // ---- Apple Health「收藏」风格大数字瓦片 2×2 ----
         item {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                StatCard(
-                    title = stringResource(R.string.guard_stat_checks),
+                MetricTile(
                     value = stats.totalChecks.toString(),
+                    label = stringResource(R.string.guard_stat_checks),
+                    icon = Icons.Outlined.FactCheck,
+                    tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.weight(1f)
                 )
-                StatCard(
-                    title = stringResource(R.string.guard_stat_failures),
+                MetricTile(
                     value = stats.totalFailures.toString(),
+                    label = stringResource(R.string.guard_stat_failures),
+                    icon = Icons.Outlined.CloudOff,
+                    tint = MaterialTheme.colorScheme.error,
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -1802,17 +1965,21 @@ private fun StatsPage(app: ToolboxApp?, logDirUri: String) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                StatCard(
-                    title = stringResource(R.string.guard_stat_heals),
+                MetricTile(
                     value = stats.totalHeals.toString(),
+                    label = stringResource(R.string.guard_stat_heals),
+                    icon = Icons.Outlined.Healing,
+                    tint = MaterialTheme.colorScheme.tertiary,
                     modifier = Modifier.weight(1f)
                 )
-                StatCard(
-                    title = stringResource(R.string.guard_stat_recovered),
+                MetricTile(
                     value = stats.totalRecovered.toString(),
+                    label = stringResource(R.string.guard_stat_recovered),
+                    icon = Icons.Outlined.TaskAlt,
+                    tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -1834,60 +2001,147 @@ private fun StatsPage(app: ToolboxApp?, logDirUri: String) {
             }
         }
 
-        // ---- 动作有效率 ----
+        // ---- 动作有效率卡（标题行含总成功率） ----
         if (stats.actionStats.isNotEmpty()) {
             item {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 4.dp)
-                ) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text(
-                            stringResource(R.string.guard_stat_action_rate),
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        stats.actionStats.entries.sortedByDescending { it.value.first }
-                            .forEach { entry ->
-                                val action = entry.key
-                                val count = entry.value
-                                val rate = if (count.first > 0) count.second * 100 / count.first else 0
-                                Column(Modifier.padding(vertical = 4.dp)) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Text(
-                                            action,
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            fontFamily = FontFamily.Monospace
-                                        )
-                                        Text(
-                                            "$rate% (${count.second}/${count.first})",
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = if (rate >= 50) MaterialTheme.colorScheme.primary
-                                            else MaterialTheme.colorScheme.error
-                                        )
-                                    }
-                                    LinearProgressIndicator(
-                                        progress = { if (count.first > 0) count.second.toFloat() / count.first else 0f },
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(top = 4.dp)
-                                    )
-                                }
-                            }
-                        Spacer(Modifier.height(4.dp))
-                    }
-                }
+                ActionRateCard(stats)
             }
         }
 
         // ---- 事件历史（单卡合并：标题 + 实时日志同款 5 按钮 + 卡内滚动列表） ----
         item {
             EventHistoryCard(stats, logDirUri)
+        }
+    }
+}
+
+/**
+ * 大数字统计瓦片（参考 Apple Health「收藏」卡片）：
+ * 左上角彩色小图标（圆角方块底）+ 大号数字 + 灰色小标签。
+ */
+@Composable
+private fun MetricTile(
+    value: String,
+    label: String,
+    icon: ImageVector,
+    tint: Color,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier,
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer
+        )
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Box(
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(tint.copy(alpha = 0.14f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(icon, null, Modifier.size(19.dp), tint = tint)
+            }
+            Spacer(Modifier.height(12.dp))
+            Text(
+                value,
+                style = MaterialTheme.typography.headlineLarge,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                label,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+/**
+ * 自愈动作有效率卡：标题行右侧显示总成功率（恢复/自愈），
+ * 每动作一行（名称 + 次数 + 百分比）+ 细圆角进度条。
+ */
+@Composable
+private fun ActionRateCard(stats: GuardStats) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer
+        )
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    stringResource(R.string.guard_stat_action_rate),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f)
+                )
+                if (stats.totalHeals > 0) {
+                    val rate = stats.totalRecovered * 100 / stats.totalHeals
+                    Text(
+                        stringResource(R.string.guard_stat_success_rate, rate),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            stats.actionStats.entries.sortedByDescending { it.value.first }
+                .forEach { entry ->
+                    val action = entry.key
+                    val count = entry.value
+                    val rate = if (count.first > 0) count.second * 100 / count.first else 0
+                    val rateColor = if (rate >= 50) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.error
+                    Column(Modifier.padding(vertical = 6.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                action,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontFamily = FontFamily.Monospace,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text(
+                                "${count.second}/${count.first}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(Modifier.width(10.dp))
+                            Text(
+                                "$rate%",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = rateColor
+                            )
+                        }
+                        Spacer(Modifier.height(6.dp))
+                        LinearProgressIndicator(
+                            progress = {
+                                if (count.first > 0) count.second.toFloat() / count.first else 0f
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(3.dp)),
+                            color = rateColor,
+                            trackColor = rateColor.copy(alpha = 0.15f)
+                        )
+                    }
+                }
         }
     }
 }
@@ -1945,7 +2199,11 @@ private fun EventHistoryCard(stats: GuardStats, logDirUri: String) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer
+        )
     ) {
         Column(Modifier.padding(12.dp)) {
             // ---- 标题 + 操作按钮行（与实时日志卡片同款） ----
@@ -2039,7 +2297,7 @@ private fun EventHistoryCard(stats: GuardStats, logDirUri: String) {
 
             Spacer(Modifier.height(8.dp))
 
-            // ---- 事件列表（卡内滚动，全部展示） ----
+            // ---- 事件列表（卡内滚动，iOS 分组列表风格：行间 hairline 分隔线） ----
             if (events.isEmpty()) {
                 Text(
                     stringResource(R.string.guard_no_events),
@@ -2053,24 +2311,44 @@ private fun EventHistoryCard(stats: GuardStats, logDirUri: String) {
                         .heightIn(max = 420.dp)
                         .verticalScroll(rememberScrollState())
                 ) {
-                    events.forEach { e ->
+                    events.forEachIndexed { idx, e ->
                         Column(
                             Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 4.dp)
+                                .padding(vertical = 8.dp)
                         ) {
-                            Text(
-                                "${GuardStats.formatTime(e.time)}  ${e.ssid}",
-                                style = MaterialTheme.typography.bodySmall,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Medium
-                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    GuardStats.formatTime(e.time),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    e.ssid,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = FontFamily.Monospace,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false)
+                                )
+                            }
+                            Spacer(Modifier.height(2.dp))
                             Text(
                                 "${e.actions} → ${if (e.recovered) "✓" else "✗"} ${e.costMs / 1000}s (${e.failedProbes})",
                                 style = MaterialTheme.typography.bodySmall,
                                 fontFamily = FontFamily.Monospace,
                                 color = if (e.recovered) MaterialTheme.colorScheme.primary
                                 else MaterialTheme.colorScheme.error
+                            )
+                        }
+                        if (idx < events.lastIndex) {
+                            HorizontalDivider(
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
                             )
                         }
                     }
@@ -2081,34 +2359,5 @@ private fun EventHistoryCard(stats: GuardStats, logDirUri: String) {
 
     if (showManage) {
         SavedLogsDialog(context = context, logDirUri = logDirUri, onDismiss = { showManage = false })
-    }
-}
-
-@Composable
-private fun StatCard(title: String, value: String, modifier: Modifier = Modifier) {
-    Card(
-        modifier = modifier.padding(vertical = 4.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-        )
-    ) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                value,
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary
-            )
-            Text(
-                title,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
     }
 }

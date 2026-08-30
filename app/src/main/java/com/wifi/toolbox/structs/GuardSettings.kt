@@ -134,6 +134,12 @@ data class GuardSettings(
     val logDirUri: String = LOG_DIR_URI_DEFAULT,
 
     /**
+     * 自动清理保留天数（0 = 关闭；1/3/7/30 = 超过 N 天的实时日志与事件历史
+     * 自动删除，参考 iOS「保留历史记录」模式）。清理在检测轮次与页面打开时触发。
+     */
+    val autoCleanDays: Int = AUTO_CLEAN_DAYS_DEFAULT,
+
+    /**
      * 特权执行通道（自愈动作与 ICMP ping 探测的 shell 命令共用）：
      * 0 = 自动（Shizuku 可用选 Shizuku，否则 Root AIDL，最后本地 sh）
      * 1 = 仅 Shizuku
@@ -175,6 +181,7 @@ data class GuardSettings(
         const val VERBOSE_LOG_KEY = "guard_verbose_log" // 旧版布尔开关（迁移源）
         const val LOG_LEVELS_KEY = "guard_log_levels"
         const val LOG_DIR_URI_KEY = "guard_log_dir_uri"
+        const val AUTO_CLEAN_DAYS_KEY = "guard_auto_clean_days"
         const val HEAL_CHANNEL_KEY = "guard_heal_channel"
         const val START_ON_BOOT_KEY = "guard_start_on_boot"
 
@@ -203,6 +210,11 @@ data class GuardSettings(
         /** 默认记录全部类型（正常+警告+错误+自愈） */
         const val LOG_LEVELS_DEFAULT = 0b1111
         const val LOG_DIR_URI_DEFAULT = ""
+        /** 默认关闭自动清理（保持旧行为） */
+        const val AUTO_CLEAN_DAYS_DEFAULT = 0
+
+        /** 自动清理保留天数预设（0 = 关闭） */
+        val AUTO_CLEAN_PRESETS = listOf(0, 1, 3, 7, 30)
         const val HEAL_CHANNEL_DEFAULT = 0
         const val START_ON_BOOT_DEFAULT = false
 
@@ -281,6 +293,9 @@ data class GuardSettings(
                     LOG_LEVELS_DEFAULT
                 },
                 logDirUri = prefs.getString(LOG_DIR_URI_KEY, LOG_DIR_URI_DEFAULT).orEmpty(),
+                autoCleanDays = prefs.getInt(
+                    AUTO_CLEAN_DAYS_KEY, AUTO_CLEAN_DAYS_DEFAULT
+                ).coerceIn(0, 365),
                 healChannel = prefs.getInt(HEAL_CHANNEL_KEY, HEAL_CHANNEL_DEFAULT),
                 startOnBoot = prefs.getBoolean(START_ON_BOOT_KEY, START_ON_BOOT_DEFAULT)
             )
