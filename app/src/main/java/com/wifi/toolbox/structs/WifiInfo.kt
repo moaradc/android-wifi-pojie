@@ -12,6 +12,7 @@ data class WifiInfo(
     val level: Int = 0,
     val bssid: String = "",
     val capabilities: String = "",
+    val frequency: Int = 0,   // MHz（2.4G/5G/6G 频段与信道计算用，0=未知）
     val savedInfo: WifiConfiguration? = null,
     val pojieHistoryItem: PojieHistoryItem? = null
 ) : Parcelable {    companion object {

@@ -485,14 +485,20 @@ object ShizukuUtil {
         val bssidField = scanResultClass.getField("BSSID")
         val levelField = scanResultClass.getField("level")
         val capabilitiesField = scanResultClass.getField("capabilities")
+        val frequencyField = try {
+            scanResultClass.getField("frequency")
+        } catch (_: Exception) { null }
 
         scanResultsList.forEach { result ->
             val ssid = ssidField.get(result)?.toString() ?: ""
             val bssid = bssidField.get(result)?.toString() ?: ""
             val level = levelField.get(result) as Int
             val capabilities = capabilitiesField.get(result)?.toString() ?: ""
+            val frequency = try {
+                frequencyField?.get(result) as? Int ?: 0
+            } catch (_: Exception) { 0 }
 
-            results.add(WifiInfo(ssid, level, bssid, capabilities))
+            results.add(WifiInfo(ssid, level, bssid, capabilities, frequency))
         }
         results.sortByDescending { it.level }
         return results

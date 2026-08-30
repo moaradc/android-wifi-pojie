@@ -184,7 +184,8 @@ object ApiUtil {
                     ssid = it.SSID,
                     level = it.level,
                     bssid = it.BSSID,
-                    capabilities = it.capabilities
+                    capabilities = it.capabilities,
+                    frequency = it.frequency
                 )
             }.sortedByDescending { it.level }
         }

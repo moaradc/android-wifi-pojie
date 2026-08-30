@@ -439,6 +439,14 @@ class AidlService : RootService() {
                         "capabilities",
                         result.javaClass.getField("capabilities").get(result)?.toString() ?: ""
                     )
+                    try {
+                        putInt(
+                            "frequency",
+                            result.javaClass.getField("frequency").get(result) as Int
+                        )
+                    } catch (_: Exception) {
+                        putInt("frequency", 0)
+                    }
                 }
             }
         }

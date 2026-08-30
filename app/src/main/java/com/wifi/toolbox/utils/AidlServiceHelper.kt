@@ -22,8 +22,9 @@ object AidlServiceHelper {
             val bssid = it.getString("bssid")!!
             val level = it.getInt("level")
             val capabilities = it.getString("capabilities")!!
+            val frequency = it.getInt("frequency", 0)
 
-            results.add(WifiInfo(ssid, level, bssid, capabilities))
+            results.add(WifiInfo(ssid, level, bssid, capabilities, frequency))
         }
         results.sortByDescending { it.level }
         return results

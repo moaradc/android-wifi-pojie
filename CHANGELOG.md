@@ -1,3 +1,14 @@
+# v3.0.0_Alpha-22
+
+- 修复：主页网络状态卡缓存新增 WiFi 会话句柄检测——`Network.getNetworkHandle()` 每次连接重新分配且与定位开关无关，关闭 WiFi / 切换 WiFi / 断开重连 / 切换到移动网络时状态即时刷新；定位关闭期间切换 WiFi 不再显示旧网络名（此前最长需等待 60 秒过期刷新），新会话立即经特权通道解析
+- 新增：WiFi 管理器完整实装（原「扫描 / 本地 / 设置」三页均为未完成占位）——
+  - 扫描页：信号四档分级（dBm 与主流分析工具一致分界）、SSID / BSSID / 频段 / 信道（2.4G / 5G / 6G 信道换算）/ 加密类型 / dBm 数值展示，当前连接高亮、已保存与已破解徽标，点击展开完整详情与一键复制；空态区分「WiFi 未开启」（可一键开启）与「未扫描到网络」
+  - 已保存页：系统保存网络（特权通道读取，含明文密码）与本应用破解记录（本地数据库，无任何权限要求）合并展示；密码分级可见——特权明文 > 破解记录 > 不可见（如实标注「需 Root/Shizuku」，Android 10+ 官方限制 getConfiguredNetworks 对所有应用返回空）；密码眼睛切换与复制、连接、忘记（确认对话框）、删除破解记录
+  - 网络页：当前连接全量详情（SSID / BSSID / RSSI / 链路速率 / 频段信道 / IP / 网关 / DNS / DHCP / 租约 / 系统验证状态，SSID 经三级解析不受定位限制）+ 四段信号仪表条 + 一键网络诊断（HTTP 204 / DNS / ICMP / 系统验证四项探测，复用网络守护探测引擎）
+  - 通道体系：沿用破解页「扫描通道」设置并在结果为空时自动降级补一次其他可用通道（Shizuku / Root AIDL / 系统应用层），实际数据来源在页面如实标注
+- 新增：扫描结果频段字段全链路支持（Shizuku 反射 / Root AIDL / 系统应用层三通道均新增 frequency 读取）
+- 多语言：WiFi 管理器 43 条新字符串 × 5 语言（简体中文 / English / 繁體中文 / 文言文 / en-rCN）
+
 # v3.0.0_Alpha-21
 
 - 修复：主页网络状态卡 cmd 特权解析从未生效——原解析的 `Current network:` 输出格式在 AOSP 中并不存在（考证 packages/modules/Wifi 源码 WifiShellCommand#printWifiInfo），真实格式为 `Wifi is connected to "SSID"` 与 `WifiInfo: SSID: …, Net ID: …`；现按 AOSP Android 11~16 真实输出重写解析（含 SSID 带引号/十六进制/被屏蔽三态、SSID 含逗号截取 `, BSSID:`、`Wifi is not connected` 不误匹配），12 组实测格式用例离线验证通过
