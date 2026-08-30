@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Dns
 import androidx.compose.material.icons.rounded.Lan
+import androidx.compose.material.icons.rounded.MonitorHeart
 import androidx.compose.material.icons.rounded.Science
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.SignalCellularAlt
@@ -67,6 +68,7 @@ import com.wifi.toolbox.R
 import com.wifi.toolbox.ToolboxApp
 import com.wifi.toolbox.ui.LocalNavTarget
 import com.wifi.toolbox.ui.items.TagItem
+import com.wifi.toolbox.utils.WifiIdentity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -79,6 +81,20 @@ data class NetworkState(
     val ipList: List<IpInfo> = emptyList(),
     val isWifiConnected: Boolean = false
 )
+
+/**
+ * 首页 WiFi 网络名解析缓存（跨重组/多次网络回调保留）。
+ * 网络名获取优先级：① 应用层 WifiInfo 直读（现版本方式，受定位开关限制）
+ * → ② 同一网络（netId 一致）沿用已解析结果 → ③ 特权命令解析
+ * （cmd wifi status → dumpsys wifi，遵循「执行通道」设置，不受定位限制，
+ * 10 秒节流防高频网络回调刷命令）→ ④ 兜底显示「WiFi 已连接」。
+ * ②③保证定位开关关闭时显示稳定，不在「已连接 xxx」与「WiFi 已连接」间跳变。
+ */
+private object HomeWifiCache {
+    var ssid: String = ""
+    var netId: Int = -1
+    var lastShellTryAt: Long = 0L
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -111,16 +127,42 @@ fun HomeScreen(onMenuClick: () -> Unit) {
                     if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
                         isWifi = true
                         val info = wifiManager.connectionInfo
-                        val rawSsid = info.ssid
-                        ssid =
-                            if (rawSsid == "<unknown ssid>") context.getString(R.string.wifi_connected_generic) else "${
-                                context.getString(R.string.wifi_connected_to)
-                            } ${
-                                rawSsid.trim('"')
-                            }"
+                        val rawSsid = info?.ssid?.trim('"')
+                        val netId = info?.networkId ?: -1
+                        // ① 优先：应用层 WifiInfo 直读（现版本方式）
+                        var resolved =
+                            if (!rawSsid.isNullOrEmpty() && rawSsid != "<unknown ssid>") rawSsid else ""
+                        // ② 应用层拿不到（如定位服务关闭）：同一网络沿用已解析结果，
+                        //    避免 shell 节流窗口内显示来回跳变
+                        if (resolved.isEmpty() && netId >= 0 &&
+                            HomeWifiCache.netId == netId && HomeWifiCache.ssid.isNotEmpty()
+                        ) {
+                            resolved = HomeWifiCache.ssid
+                        }
+                        // ③ 仍拿不到：特权命令解析（不受定位限制，遵循「执行通道」），
+                        //    高频网络回调 10s 节流
+                        if (resolved.isEmpty() &&
+                            System.currentTimeMillis() - HomeWifiCache.lastShellTryAt > 10_000
+                        ) {
+                            HomeWifiCache.lastShellTryAt = System.currentTimeMillis()
+                            resolved = WifiIdentity.resolve(context.applicationContext, app).first
+                        }
+                        if (resolved.isNotEmpty()) {
+                            HomeWifiCache.ssid = resolved
+                            HomeWifiCache.netId = netId
+                        }
+                        // ④ 兜底：显示「WiFi 已连接」；拿到则「已连接到 xxx」
+                        ssid = if (resolved.isEmpty())
+                            context.getString(R.string.wifi_connected_generic)
+                        else "${context.getString(R.string.wifi_connected_to)} $resolved"
                     } else if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) {
                         ssid = context.getString(R.string.mobile_data)
                     }
+                }
+                // WiFi 已断开：清缓存，重连后按 ①→③ 重新解析（防残留旧网络名）
+                if (caps == null || !caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
+                    HomeWifiCache.ssid = ""
+                    HomeWifiCache.netId = -1
                 }
                 NetworkState(ssid, getAllIpAddresses(), isWifi)
             }
@@ -236,6 +278,21 @@ fun HomeScreen(onMenuClick: () -> Unit) {
                             contentColor = if (isDark) Color(0xFFFDE495) else Color(0xFF5C4912),
                             isDark = isDark,
                             onClick = { navTarget.value = "Viewer" }
+                        )
+                    }
+
+                    // 网络守护：横向卡片样式与现版本一致（绿色系），置于竖卡组下首位
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        HomeCardItem(
+                            modifier = Modifier.weight(1f),
+                            title = stringResource(R.string.guard_name),
+                            icon = Icons.Rounded.MonitorHeart,
+                            baseColor = Color(0xFFD3F4DC),
+                            darkColor = Color(0xFF1F3D28),
+                            contentColor = if (isDark) Color(0xFFD3F4DC) else Color(0xFF2F6B3F),
+                            isDark = isDark,
+                            isHorizontal = true,
+                            onClick = { navTarget.value = "Guard" }
                         )
                     }
 
