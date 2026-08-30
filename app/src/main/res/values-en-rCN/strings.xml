@@ -482,6 +482,9 @@
     <string name="log_mode_empty">read log way empty, go set choose</string>
     <string name="log_logcat_started">Logcat service run</string>
     <string name="log_broadcast_started">Air talk service run</string>
+    <string name="log_broadcast_fallback">Air talk helper on. Log channel bad, result still OK</string>
+    <string name="logcat_stream_dead">Log stream stop bad (exit=%1$d). Air talk helper keep result OK</string>
+    <string name="logcat_no_output">No log come (no power or phone no give log). Air talk helper keep result OK</string>
     <string name="connect_mode_empty">link wifi way empty, go set choose</string>
     <string name="broadcast_not_support_handshake">Air talk no support many hand, use timeout or Logcat</string>
     <string name="log_flow_uninitialized">log flow no start</string>

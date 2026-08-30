@@ -11,6 +11,7 @@ import com.wifi.toolbox.structs.*
 import com.wifi.toolbox.utils.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.merge
 import java.util.Locale
 import kotlin.coroutines.resumeWithException
 
@@ -49,14 +50,22 @@ class ConnectWorker(
 
     /**
      * 初始化日志收集服务
+     *
+     * Logcat 模式同时启动广播监听作为兜底：logcat 能否读到 wpa_supplicant
+     * 日志取决于执行通道身份与设备输出策略（部分通道无权限、部分设备
+     * 不输出），单点依赖会导致结果判定永远等不到事件（真机反馈：直接
+     * 尝试卡在「运行中 0/1 0.0%」无限重连）。广播监听不依赖任何特权，
+     * 成功/失败判定由它兜底，logcat 保留握手计数/计时能力。
      */
     fun initLogServices(settings: PojieSettings) {
         readLogMode = settings.readLogMode
         when (readLogMode) {
             0 -> throw Exception(service.getString(R.string.log_mode_empty))
             1 -> {
-                logcatService = WifiLogcatService(service, settings)
+                logcatService = WifiLogcatService(service, settings) { service.log(it) }
+                broadcastService = WifiBroadcastService(service)
                 service.log(service.getString(R.string.log_logcat_started))
+                service.log(service.getString(R.string.log_broadcast_fallback))
             }
 
             2 -> {
@@ -165,7 +174,21 @@ class ConnectWorker(
                     } else throw Exception(service.getString(R.string.device_too_old))
                 } else {
                     val flow = when (readLogMode) {
-                        1 -> logcatService?.logFlow
+                        1 -> {
+                            // 双流合并：logcat 事件（握手计数/计时）+ 广播事件
+                            // （成功/失败判定兜底），先到先判
+                            logcatService?.setTargetSsid(task.ssid)
+                            broadcastService?.setTargetSsid(task.ssid)
+                            val logcatFlow = logcatService?.logFlow
+                            val broadcastFlow = broadcastService?.logFlow
+                            when {
+                                logcatFlow != null && broadcastFlow != null ->
+                                    merge(logcatFlow, broadcastFlow)
+
+                                else -> logcatFlow ?: broadcastFlow
+                            }
+                        }
+
                         2 -> {
                             if (app.pojieConfig.failureFlag == 2) {
                                 throw Exception(service.getString(R.string.broadcast_not_support_handshake))

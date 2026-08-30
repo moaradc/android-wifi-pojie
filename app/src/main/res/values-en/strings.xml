@@ -481,6 +481,9 @@
     <string name="log_mode_empty">Read mode empty, check settings</string>
     <string name="log_logcat_started">Logcat started</string>
     <string name="log_broadcast_started">Broadcast started</string>
+    <string name="log_broadcast_fallback">Broadcast fallback enabled. Verdicts unaffected if network log channel fails</string>
+    <string name="logcat_stream_dead">Network log stream exited abnormally (exit=%1$d). Verdicts covered by broadcast fallback</string>
+    <string name="logcat_no_output">No network log output (no permission or unsupported device). Verdicts covered by broadcast fallback</string>
     <string name="connect_mode_empty">Connect mode empty, check settings</string>
     <string name="broadcast_not_support_handshake">Broadcast mode doesn\'t support handshake limit. Use timeout or Logcat.</string>
     <string name="log_flow_uninitialized">Log flow uninit</string>

@@ -481,6 +481,9 @@
     <string name="log_mode_empty">察实录之法空缺，请先于陈设中定夺</string>
     <string name="log_logcat_started">日志法事已起</string>
     <string name="log_broadcast_started">传音监听已起</string>
+    <string name="log_broadcast_fallback">已备传音之辅，日志之道有恙，判结不失</string>
+    <string name="logcat_stream_dead">日志之流遽止（exit=%1$d），判结赖传音之辅</string>
+    <string name="logcat_no_output">久无日志之讯（无权或此机不出此讯），判结赖传音之辅</string>
     <string name="connect_mode_empty">求盟之法空缺，请先于陈设中定夺</string>
     <string name="broadcast_not_support_handshake">传音模式不通此判别之法，请易为“超时”或“日志”</string>
     <string name="log_flow_uninitialized">实录之源未溯</string>

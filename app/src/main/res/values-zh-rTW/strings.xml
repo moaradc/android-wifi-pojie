@@ -481,6 +481,9 @@
     <string name="log_mode_empty">讀取網路日誌實作為空，請先到設定中選擇</string>
     <string name="log_logcat_started">Logcat 服務已啟動</string>
     <string name="log_broadcast_started">廣播監聽服務已啟動</string>
+    <string name="log_broadcast_fallback">已啟用廣播監聽兜底，網路日誌通道異常時不影響連線結果判定</string>
+    <string name="logcat_stream_dead">網路日誌串流異常結束（exit=%1$d），連線結果判定已由廣播監聽兜底</string>
+    <string name="logcat_no_output">網路日誌通道持續無輸出（無權限或該裝置不輸出相關日誌），連線結果判定已由廣播監聽兜底</string>
     <string name="connect_mode_empty">連接 WiFi 實作為空，請先到設定中選擇</string>
     <string name="broadcast_not_support_handshake">廣播監聽模式不支援按握手次數判定，請改為「握手超時」或切換為 Logcat 模式</string>
     <string name="log_flow_uninitialized">日誌流未初始化</string>

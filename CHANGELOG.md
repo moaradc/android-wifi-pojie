@@ -1,3 +1,13 @@
+# v3.0.0_Alpha-24
+
+- 修复：Logcat 日志模式「直接尝试」永远卡在运行中（进度 0/1 0.0%，反复 已连接→未连接→已连接）——logcat 能否读到 wpa_supplicant 日志取决于执行通道身份（root/shell 可读，普通应用自 Android 4.1 起无 READ_LOGS 被拒）且部分设备根本不输出该日志，日志流零事件时结果判定只能干等整体超时，叠加默认「重试次数=无限」形成无限重连循环。现 Logcat 模式并行启动广播监听兜底（双流合并，先到先判）：成功/失败判定不再单点依赖日志解析，logcat 保留握手计数/计时能力（握手超次判定仍需日志流）
+- 修复：广播监听成功判定改为 SupplicantState.COMPLETED——官方语义为「全部认证流程完成，WPA2 下即 4 次握手成功」，即密码正确的最早可靠信号，不再等待网络层 CONNECTED（DHCP 完成），判定更早且不受个别设备 DHCP 慢导致超出密码超时误判的影响；网络层 CONNECTED 保留作为 COMPLETED 的兜底信号
+- 修复：广播成功事件携带实际连接 SSID 校验——定位可用时读取 WifiInfo 实际 SSID 与目标比对，防止尝试期间系统自动重连其他已保存网络造成误判成功；读不到实际 SSID 时沿用目标 SSID 假设（与历史行为一致）
+- 修复：认证失败（ERROR_AUTHENTICATING）不再限定「密码超时」判定模式才生效——认证失败即密码错误属定论信号，所有判定模式下立即判负，错误密码不再干等握手超时/整体超时，破解循环显著提速
+- 修复：Logcat 日志流健康监测——流式命令本不应自行退出，异常立即结束（执行通道未连接/无权限/命令错误）或 30 秒零输出时，在运行日志中明确提示通道状态与兜底情况，不再静默失败让用户排查无门
+- 修复：Logcat 成功判定双模式——新增 wpa_supplicant 标准事件 CTRL-EVENT-CONNECTED（跨版本稳定字符串）与「WPA: Key negotiation completed」互补提升设备覆盖面；成功事件在起始行（Trying to associate / enableNetwork）未匹配时改用日志行到达时间与目标 SSID 兜底，避免被新鲜度检查误丢弃（此前该场景下即使成功日志已到达也会被判为过期事件丢弃）
+- 多语言：3 条新字符串 × 5 语言（简体中文 / English / 繁體中文 / 文言文 / en-rCN）
+
 # v3.0.0_Alpha-23
 
 - 修复：密码字典破解成功后 WiFi 立即断开——成功路径此前仍执行 cleanConnection：API29 系统通道（WifiNetworkSpecifier）注销回调即释放请求来源的网络（官方文档：unregisterNetworkCallback "possibly releases networks originating from a request"），且 onAvailable 内自注销回调等于连上即拆；Shizuku/API 通道在「断开方式」为 Shizuku/系统 API 时主动 disconnect/disableNetwork 同样立即断开。现成功后保持连接不断开，仅失败/超时/中断复位；specifier 请求改为进程级单例管理，新请求发出前先释放旧请求（防新旧请求争夺射频来回切换），cancelWifiRequest 幂等化（重复注销的 IllegalArgumentException 此前会沿调用链向上中断成功结果处理）

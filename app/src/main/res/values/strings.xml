@@ -490,6 +490,9 @@
     <string name="log_mode_empty">读取网络日志实现为空，请先去设置中选择</string>
     <string name="log_logcat_started">Logcat服务已启动</string>
     <string name="log_broadcast_started">广播监听服务已启动</string>
+    <string name="log_broadcast_fallback">已启用广播监听兜底，网络日志通道异常时不影响连接结果判定</string>
+    <string name="logcat_stream_dead">网络日志流异常退出（exit=%1$d），连接结果判定已由广播监听兜底</string>
+    <string name="logcat_no_output">网络日志通道持续无输出（无权限或该设备不输出相关日志），连接结果判定已由广播监听兜底</string>
     <string name="connect_mode_empty">连接wifi实现为空，请先去设置中选择</string>
     <string name="broadcast_not_support_handshake">广播监听模式不支持按握手次数判定，请改为“握手超时”或切换为Logcat模式</string>
     <string name="log_flow_uninitialized">日志流未初始化</string>
