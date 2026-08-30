@@ -8,7 +8,16 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
@@ -28,6 +37,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -49,6 +59,7 @@ import com.wifi.toolbox.structs.GuardSettings
 import com.wifi.toolbox.ui.items.BannerTip
 import com.wifi.toolbox.ui.items.NavContainer
 import com.wifi.toolbox.ui.items.NavPage
+import com.wifi.toolbox.ui.items.TipIconButton
 import com.wifi.toolbox.ui.items.checkShizukuUI
 import com.wifi.toolbox.utils.GuardEvent
 import com.wifi.toolbox.utils.GuardLogStore
@@ -628,6 +639,13 @@ private fun LiveLogCard(context: Context, logDirUri: String) {
     var filterMask by rememberSaveable { mutableIntStateOf(LOG_FILTER_ALL) }
     var showManage by remember { mutableStateOf(false) }
     var toastMsg by remember { mutableStateOf<String?>(null) }
+    // 展开收起（默认展开，收起后仅保留标题与按钮行）
+    var expanded by rememberSaveable { mutableStateOf(true) }
+    val chevronRotation by animateFloatAsState(
+        targetValue = if (expanded) 180f else 0f,
+        animationSpec = tween(250),
+        label = "liveLogChevron"
+    )
 
     fun toast(msg: String) {
         toastMsg = msg
@@ -678,7 +696,7 @@ private fun LiveLogCard(context: Context, logDirUri: String) {
         )
     ) {
         Column(Modifier.padding(12.dp)) {
-            // ---- 标题 + 操作按钮行 ----
+            // ---- 标题 + 操作按钮行（长按任意按钮弹出名称提示气泡） ----
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
@@ -687,12 +705,14 @@ private fun LiveLogCard(context: Context, logDirUri: String) {
                     stringResource(R.string.guard_live_log),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )
-                IconButton(
+                TipIconButton(
                     onClick = {
                         val entries = visibleEntries()
-                        if (entries.isEmpty()) return@IconButton
+                        if (entries.isEmpty()) return@TipIconButton
                         val cm = context.getSystemService(Context.CLIPBOARD_SERVICE)
                                 as ClipboardManager
                         cm.setPrimaryClip(
@@ -702,15 +722,10 @@ private fun LiveLogCard(context: Context, logDirUri: String) {
                         )
                         toast(context.getString(R.string.guard_log_copied, entries.size))
                     },
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Icon(
-                        Icons.Outlined.ContentCopy,
-                        stringResource(R.string.guard_log_copy_desc),
-                        Modifier.size(17.dp)
-                    )
-                }
-                IconButton(
+                    tip = stringResource(R.string.guard_log_copy_desc),
+                    icon = Icons.Outlined.ContentCopy
+                )
+                TipIconButton(
                     onClick = {
                         val saved = saveNow()
                         toast(
@@ -720,103 +735,108 @@ private fun LiveLogCard(context: Context, logDirUri: String) {
                             else context.getString(R.string.guard_log_save_fail)
                         )
                     },
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Icon(
-                        Icons.Outlined.Save,
-                        stringResource(R.string.guard_log_save_desc),
-                        Modifier.size(17.dp)
-                    )
-                }
-                IconButton(
+                    tip = stringResource(R.string.guard_log_save_desc),
+                    icon = Icons.Outlined.Save
+                )
+                TipIconButton(
                     onClick = {
                         val saved = saveNow()
                         if (saved != null) shareStoredFile(context, saved)
                         else toast(context.getString(R.string.guard_log_save_fail))
                     },
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Icon(
-                        Icons.Outlined.IosShare,
-                        stringResource(R.string.guard_log_export_desc),
-                        Modifier.size(17.dp)
-                    )
-                }
-                IconButton(
+                    tip = stringResource(R.string.guard_log_export_desc),
+                    icon = Icons.Outlined.IosShare
+                )
+                TipIconButton(
                     onClick = { showManage = true },
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Icon(
-                        Icons.Outlined.FolderOpen,
-                        stringResource(R.string.guard_log_manage_desc),
-                        Modifier.size(17.dp)
-                    )
-                }
-                IconButton(
+                    tip = stringResource(R.string.guard_log_manage_desc),
+                    icon = Icons.Outlined.FolderOpen
+                )
+                TipIconButton(
                     onClick = {
                         GuardState.clearLogs()
                         toast(context.getString(R.string.guard_log_cleared))
                     },
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Icon(
-                        Icons.Outlined.DeleteSweep,
-                        stringResource(R.string.guard_log_clear_desc),
-                        Modifier.size(17.dp)
-                    )
-                }
+                    tip = stringResource(R.string.guard_log_clear_desc),
+                    icon = Icons.Outlined.DeleteSweep
+                )
+                // 展开 / 收起（箭头随状态旋转）
+                TipIconButton(
+                    onClick = { expanded = !expanded },
+                    tip = stringResource(R.string.guard_log_expand_desc),
+                    icon = Icons.Outlined.ExpandMore,
+                    iconModifier = Modifier.rotate(chevronRotation)
+                )
             }
 
-            // ---- 筛选行（多选） ----
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.padding(top = 4.dp)
+            // ---- 筛选行 + 日志正文（展开时显示，展开收起带动画） ----
+            AnimatedVisibility(
+                visible = expanded,
+                enter = expandVertically(
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioNoBouncy,
+                        stiffness = Spring.StiffnessMediumLow
+                    )
+                ) + fadeIn(tween(200)),
+                exit = shrinkVertically(
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioNoBouncy,
+                        stiffness = Spring.StiffnessMediumLow
+                    )
+                ) + fadeOut(tween(150))
             ) {
-                FilterChip(
-                    selected = filterMask == LOG_FILTER_ALL,
-                    onClick = { filterMask = LOG_FILTER_ALL },
-                    label = { Text(stringResource(R.string.guard_log_filter_all)) }
-                )
-                FilterChip(
-                    selected = filterMask and LOG_FILTER_INFO != 0,
-                    onClick = { filterMask = filterMask xor LOG_FILTER_INFO },
-                    label = { Text(stringResource(R.string.guard_log_filter_info)) }
-                )
-                FilterChip(
-                    selected = filterMask and LOG_FILTER_ERROR != 0,
-                    onClick = { filterMask = filterMask xor LOG_FILTER_ERROR },
-                    label = { Text(stringResource(R.string.guard_log_filter_error)) }
-                )
-                FilterChip(
-                    selected = filterMask and LOG_FILTER_HEAL != 0,
-                    onClick = { filterMask = filterMask xor LOG_FILTER_HEAL },
-                    label = { Text(stringResource(R.string.guard_log_filter_heal)) }
-                )
-            }
+                Column {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.padding(top = 4.dp)
+                    ) {
+                        FilterChip(
+                            selected = filterMask == LOG_FILTER_ALL,
+                            onClick = { filterMask = LOG_FILTER_ALL },
+                            label = { Text(stringResource(R.string.guard_log_filter_all)) }
+                        )
+                        FilterChip(
+                            selected = filterMask and LOG_FILTER_INFO != 0,
+                            onClick = { filterMask = filterMask xor LOG_FILTER_INFO },
+                            label = { Text(stringResource(R.string.guard_log_filter_info)) }
+                        )
+                        FilterChip(
+                            selected = filterMask and LOG_FILTER_ERROR != 0,
+                            onClick = { filterMask = filterMask xor LOG_FILTER_ERROR },
+                            label = { Text(stringResource(R.string.guard_log_filter_error)) }
+                        )
+                        FilterChip(
+                            selected = filterMask and LOG_FILTER_HEAL != 0,
+                            onClick = { filterMask = filterMask xor LOG_FILTER_HEAL },
+                            label = { Text(stringResource(R.string.guard_log_filter_heal)) }
+                        )
+                    }
 
-            Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(8.dp))
 
-            // ---- 日志正文 ----
-            val filtered = if (filterMask == 0) emptyList()
-            else logs.filter { filterMask and logGroupBit(it.level) != 0 }
-            if (filtered.isEmpty()) {
-                Text(
-                    stringResource(
-                        if (filterMask == 0) R.string.guard_log_filter_none
-                        else R.string.guard_no_log
-                    ),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            } else {
-                filtered.takeLast(50).forEach { entry ->
-                    Text(
-                        formatEntry(entry),
-                        style = MaterialTheme.typography.bodySmall,
-                        fontFamily = FontFamily.Monospace,
-                        color = logLevelColor(entry.level),
-                        modifier = Modifier.padding(vertical = 1.dp)
-                    )
+                    // ---- 日志正文 ----
+                    val filtered = if (filterMask == 0) emptyList()
+                    else logs.filter { filterMask and logGroupBit(it.level) != 0 }
+                    if (filtered.isEmpty()) {
+                        Text(
+                            stringResource(
+                                if (filterMask == 0) R.string.guard_log_filter_none
+                                else R.string.guard_no_log
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        filtered.takeLast(50).forEach { entry ->
+                            Text(
+                                formatEntry(entry),
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                                color = logLevelColor(entry.level),
+                                modifier = Modifier.padding(vertical = 1.dp)
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -2170,6 +2190,13 @@ private fun EventHistoryCard(stats: GuardStats, logDirUri: String) {
     var showManage by remember { mutableStateOf(false) }
     var showResetConfirm by remember { mutableStateOf(false) }
     var toastMsg by remember { mutableStateOf<String?>(null) }
+    // 展开收起（默认展开，收起后仅保留标题与按钮行）
+    var expanded by rememberSaveable { mutableStateOf(true) }
+    val chevronRotation by animateFloatAsState(
+        targetValue = if (expanded) 180f else 0f,
+        animationSpec = tween(250),
+        label = "eventsChevron"
+    )
 
     fun toast(msg: String) {
         toastMsg = msg
@@ -2218,7 +2245,7 @@ private fun EventHistoryCard(stats: GuardStats, logDirUri: String) {
         )
     ) {
         Column(Modifier.padding(12.dp)) {
-            // ---- 标题 + 操作按钮行（与实时日志卡片同款） ----
+            // ---- 标题 + 操作按钮行（与实时日志卡片同款，长按弹出名称提示气泡） ----
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
@@ -2227,11 +2254,13 @@ private fun EventHistoryCard(stats: GuardStats, logDirUri: String) {
                     stringResource(R.string.guard_stat_events),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )
-                IconButton(
+                TipIconButton(
                     onClick = {
-                        if (events.isEmpty()) return@IconButton
+                        if (events.isEmpty()) return@TipIconButton
                         val cm = context.getSystemService(Context.CLIPBOARD_SERVICE)
                                 as ClipboardManager
                         cm.setPrimaryClip(
@@ -2242,15 +2271,10 @@ private fun EventHistoryCard(stats: GuardStats, logDirUri: String) {
                         )
                         toast(context.getString(R.string.guard_events_copied, events.size))
                     },
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Icon(
-                        Icons.Outlined.ContentCopy,
-                        stringResource(R.string.guard_log_copy_desc),
-                        Modifier.size(17.dp)
-                    )
-                }
-                IconButton(
+                    tip = stringResource(R.string.guard_log_copy_desc),
+                    icon = Icons.Outlined.ContentCopy
+                )
+                TipIconButton(
                     onClick = {
                         val saved = saveNow()
                         toast(
@@ -2260,119 +2284,117 @@ private fun EventHistoryCard(stats: GuardStats, logDirUri: String) {
                             else context.getString(R.string.guard_log_save_fail)
                         )
                     },
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Icon(
-                        Icons.Outlined.Save,
-                        stringResource(R.string.guard_log_save_desc),
-                        Modifier.size(17.dp)
-                    )
-                }
-                IconButton(
+                    tip = stringResource(R.string.guard_log_save_desc),
+                    icon = Icons.Outlined.Save
+                )
+                TipIconButton(
                     onClick = {
                         val saved = saveNow()
                         if (saved != null) shareStoredFile(context, saved)
                         else toast(context.getString(R.string.guard_log_save_fail))
                     },
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Icon(
-                        Icons.Outlined.IosShare,
-                        stringResource(R.string.guard_log_export_desc),
-                        Modifier.size(17.dp)
-                    )
-                }
-                IconButton(
+                    tip = stringResource(R.string.guard_log_export_desc),
+                    icon = Icons.Outlined.IosShare
+                )
+                TipIconButton(
                     onClick = { showManage = true },
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Icon(
-                        Icons.Outlined.FolderOpen,
-                        stringResource(R.string.guard_log_manage_desc),
-                        Modifier.size(17.dp)
-                    )
-                }
-                IconButton(
+                    tip = stringResource(R.string.guard_log_manage_desc),
+                    icon = Icons.Outlined.FolderOpen
+                )
+                TipIconButton(
                     onClick = {
                         stats.clearEvents()
                         toast(context.getString(R.string.guard_events_cleared))
                     },
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Icon(
-                        Icons.Outlined.DeleteSweep,
-                        stringResource(R.string.guard_log_clear_desc),
-                        Modifier.size(17.dp)
-                    )
-                }
+                    tip = stringResource(R.string.guard_log_clear_desc),
+                    icon = Icons.Outlined.DeleteSweep
+                )
                 // 全部统计清零（统计+事件，与「清空事件」区分；带二次确认）
-                IconButton(
+                TipIconButton(
                     onClick = { showResetConfirm = true },
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Icon(
-                        Icons.Outlined.RestartAlt,
-                        stringResource(R.string.guard_stat_reset_desc),
-                        Modifier.size(17.dp)
-                    )
-                }
+                    tip = stringResource(R.string.guard_stat_reset_desc),
+                    icon = Icons.Outlined.RestartAlt
+                )
+                // 展开 / 收起（箭头随状态旋转）
+                TipIconButton(
+                    onClick = { expanded = !expanded },
+                    tip = stringResource(R.string.guard_log_expand_desc),
+                    icon = Icons.Outlined.ExpandMore,
+                    iconModifier = Modifier.rotate(chevronRotation)
+                )
             }
 
-            Spacer(Modifier.height(8.dp))
-
-            // ---- 事件列表（卡内滚动，iOS 分组列表风格：行间 hairline 分隔线） ----
-            if (events.isEmpty()) {
-                Text(
-                    stringResource(R.string.guard_no_events),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            } else {
-                Column(
-                    Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 420.dp)
-                        .verticalScroll(rememberScrollState())
-                ) {
-                    events.forEachIndexed { idx, e ->
-                        Column(
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 8.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically
+            // ---- 事件列表（展开时显示，展开收起带动画；卡内滚动，iOS 分组列表风格） ----
+            AnimatedVisibility(
+                visible = expanded,
+                enter = expandVertically(
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioNoBouncy,
+                        stiffness = Spring.StiffnessMediumLow
+                    )
+                ) + fadeIn(tween(200)),
+                exit = shrinkVertically(
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioNoBouncy,
+                        stiffness = Spring.StiffnessMediumLow
+                    )
+                ) + fadeOut(tween(150))
+            ) {
+                if (events.isEmpty()) {
+                    Text(
+                        stringResource(R.string.guard_no_events),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                } else {
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp)
+                            .heightIn(max = 420.dp)
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        events.forEachIndexed { idx, e ->
+                            Column(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 8.dp)
                             ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        GuardStats.formatTime(e.time),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        e.ssid,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontFamily = FontFamily.Monospace,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f, fill = false)
+                                    )
+                                }
+                                Spacer(Modifier.height(2.dp))
                                 Text(
-                                    GuardStats.formatTime(e.time),
+                                    "${e.actions} → ${if (e.recovered) "✓" else "✗"} ${e.costMs / 1000}s (${e.failedProbes})",
                                     style = MaterialTheme.typography.bodySmall,
                                     fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Spacer(Modifier.width(8.dp))
-                                Text(
-                                    e.ssid,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontFamily = FontFamily.Monospace,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f, fill = false)
+                                    color = if (e.recovered) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.error
                                 )
                             }
-                            Spacer(Modifier.height(2.dp))
-                            Text(
-                                "${e.actions} → ${if (e.recovered) "✓" else "✗"} ${e.costMs / 1000}s (${e.failedProbes})",
-                                style = MaterialTheme.typography.bodySmall,
-                                fontFamily = FontFamily.Monospace,
-                                color = if (e.recovered) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.error
-                            )
-                        }
-                        if (idx < events.lastIndex) {
-                            HorizontalDivider(
-                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-                            )
+                            if (idx < events.lastIndex) {
+                                HorizontalDivider(
+                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                                )
+                            }
                         }
                     }
                 }

@@ -27,6 +27,7 @@ import com.wifi.toolbox.utils.GuardStats
 import com.wifi.toolbox.utils.NetProber
 import com.wifi.toolbox.utils.ShizukuUtil
 import com.wifi.toolbox.utils.WifiHealer
+import com.wifi.toolbox.utils.WifiIdentity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -78,6 +79,7 @@ class GuardService : Service() {
     private var backoffSkipNotified = false  // 退避跳过提示已发（每个退避窗口仅记一次日志）
     private var lastEventLog = ""            // 最近一次事件触发的 action（去重）
     private var breakerNotified = false      // 熔断提示已发（防重复日志/通知）
+    private var lastCheckDoneAt = 0L         // 上次检测完成时刻（最小检测间隔防重）
     private var wakeLock: PowerManager.WakeLock? = null  // 后台保活：息屏 CPU 唤醒锁
     private var autoSaveDay = ""                      // 自动保存：当天日期戳（跨天触发旧文件清理）
 
@@ -195,9 +197,28 @@ class GuardService : Service() {
     }
 
     /**
-     * 单轮检测 + 必要时自愈。manual=true 时跳过防抖（手动检测立即给出结论）
+     * 单轮检测 + 必要时自愈（带最小间隔防重）。
+     *
+     * 防重背景：NETWORK_STATE_CHANGED 是粘性广播，registerReceiver 注册当刻
+     * 即回调一次，与 Alpha-16 移除首轮固定延迟后的"开启即检测"几乎同时执行，
+     * 造成每次开启守护出现两条内容相同的"在线 ✓"日志（相差约 2 秒）；
+     * 网络切换也常连发多条广播。距上次检测完成不足 [MIN_CHECK_GAP_MS] 的
+     * 非手动检测直接跳过（手动"立即检测"不受限，用户意图优先）。
      */
     private suspend fun runOneCheck(manual: Boolean = false) = healMutex.withLock {
+        val now = System.currentTimeMillis()
+        if (!manual && lastCheckDoneAt > 0 && now - lastCheckDoneAt < MIN_CHECK_GAP_MS) {
+            return@withLock
+        }
+        try {
+            doCheck(manual)
+        } finally {
+            lastCheckDoneAt = System.currentTimeMillis()
+        }
+    }
+
+    /** 检测主体：manual=true 时跳过防抖（手动检测立即给出结论） */
+    private suspend fun doCheck(manual: Boolean) {
         if (manual) {
             // 手动"立即检测" = 半开探测：复位熔断计数与退避窗口
             // （用户明确希望立即再试一次，不应被退避门槛拦住）
@@ -223,7 +244,7 @@ class GuardService : Service() {
                 }
                 GuardState.lastCheckTime = System.currentTimeMillis()
                 GuardState.currentState = GuardState.STATE_LINK_DOWN
-                return@withLock
+                return
             }
         }
 
@@ -253,7 +274,7 @@ class GuardService : Service() {
             }
             consecutiveFails = 0
             GuardState.currentState = GuardState.STATE_ONLINE
-            return@withLock
+            return
         }
 
         consecutiveFails++
@@ -268,21 +289,21 @@ class GuardService : Service() {
         // 防抖：未达阈值不动作
         if (!manual && consecutiveFails < settings.failThreshold) {
             GuardState.currentState = GuardState.STATE_SUSPECT
-            return@withLock
+            return
         }
 
         // WiFi 链路已断开：可能是用户主动断开，不重连
         if (settings.skipWhenWifiDisconnected && !verdict.wifiConnected) {
             log(getString(R.string.guard_log_wifi_link_down), GuardLog.LEVEL_WARN)
             GuardState.currentState = GuardState.STATE_LINK_DOWN
-            return@withLock
+            return
         }
 
         // Captive Portal：重连无意义
         if (settings.skipOnCaptivePortal && verdict.portal) {
             log(getString(R.string.guard_log_portal), GuardLog.LEVEL_WARN)
             GuardState.currentState = GuardState.STATE_PORTAL
-            return@withLock
+            return
         }
 
         GuardState.currentState = GuardState.STATE_HEALING
@@ -296,46 +317,8 @@ class GuardService : Service() {
      * 且定位服务开启，否则返回 <unknown ssid>；netId 在部分 ROM 上同样受限。
      * 特权通道（Shizuku/Root AIDL）不受此限制，作为兑底。
      */
-    private suspend fun wifiIdentity(): Pair<String, Int> {
-        var ssid = ""
-        var netId = -1
-        try {
-            val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-            @Suppress("DEPRECATION")
-            val info = wm.connectionInfo
-            val raw = info?.ssid?.removeSurrounding("\"").orEmpty()
-            if (raw.isNotEmpty() && raw != "<unknown ssid>") ssid = raw
-            if (info != null) netId = info.networkId
-        } catch (_: Exception) {
-        }
-        if (ssid.isEmpty() || netId == -1) {
-            try {
-                // Android 11+：cmd wifi status 输出形如 Current network: #0 "SSID"
-                if (ssid.isEmpty()) {
-                    val status = healer.shellExec("cmd wifi status").output
-                    ssid = Regex("Current network:.*?\"([^\"]+)\"")
-                        .find(status)?.groupValues?.get(1)
-                        ?.removeSurrounding("\"")?.trim().orEmpty()
-                }
-                if (ssid.isEmpty() || netId == -1) {
-                    // 通用兑底：dumpsys wifi 的 mWifiInfo 行（含 SSID 与 Net ID）
-                    val dump = healer.shellExec("dumpsys wifi").output
-                    if (ssid.isEmpty()) {
-                        ssid = Regex("mWifiInfo SSID: ([^,\\r\\n]+)")
-                            .find(dump)?.groupValues?.get(1)
-                            ?.removeSurrounding("\"")?.trim().orEmpty()
-                        if (ssid == "<unknown ssid>") ssid = ""
-                    }
-                    if (netId == -1) {
-                        netId = Regex("mWifiInfo.*?Net ID: (\\d+)")
-                            .find(dump)?.groupValues?.get(1)?.toIntOrNull() ?: -1
-                    }
-                }
-            } catch (_: Exception) {
-            }
-        }
-        return ssid to netId
-    }
+    private suspend fun wifiIdentity(): Pair<String, Int> =
+        WifiIdentity.resolve(applicationContext, applicationContext as? ToolboxApp)
 
     private suspend fun performHeal(verdict: com.wifi.toolbox.utils.ProbeVerdict) {
         // ---- 熔断检查（Circuit Breaker，网络调研 AWS/ByteByteGo 通行做法）----
@@ -613,6 +596,9 @@ class GuardService : Service() {
 
         /** 自动保存日志滚动文件保留个数（guard-auto-*.log，跨天时清理） */
         const val AUTO_SAVE_KEEP = 30
+
+        /** 非手动检测的最小间隔（毫秒）：防粘性广播/广播连发与首轮检测叠加重复 */
+        const val MIN_CHECK_GAP_MS = 5_000L
 
         private fun createChannelStatic(context: Context) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

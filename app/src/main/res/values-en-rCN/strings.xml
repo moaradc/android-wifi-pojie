@@ -248,6 +248,7 @@
     <string name="guard_log_save_desc">Save log to file</string>
     <string name="guard_log_export_desc">Export log (share)</string>
     <string name="guard_log_manage_desc">Manage saved logs</string>
+    <string name="guard_log_expand_desc">Expand or collapse</string>
     <string name="guard_log_share_desc">Share</string>
     <string name="guard_log_delete_desc">Delete</string>
     <string name="guard_log_file_header">WiFi Toolbox network guard log</string>
@@ -565,6 +566,9 @@
     <string name="nav_manager">wifi boss</string>
     <string name="nav_test">lab</string>
     <string name="nav_settings">set</string>
+    <string name="tile_pojie">Crack</string>
+    <string name="tile_guard">Guard</string>
+    <string name="tile_manager">Manager</string>
     <string name="found_saved_password">find saved pass</string>
     <string name="found_saved_password_tip">system have this wifi info, link direct?</string>
     <string name="re_run">run again</string>

@@ -7,14 +7,21 @@ import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.wifi.WifiManager
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -28,11 +35,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowForwardIos
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Dns
 import androidx.compose.material.icons.rounded.Lan
+import androidx.compose.material.icons.rounded.MonitorHeart
 import androidx.compose.material.icons.rounded.Science
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.SignalCellularAlt
@@ -46,7 +53,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -54,19 +60,25 @@ import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.wifi.toolbox.R
 import com.wifi.toolbox.ToolboxApp
 import com.wifi.toolbox.ui.LocalNavTarget
 import com.wifi.toolbox.ui.items.TagItem
+import com.wifi.toolbox.utils.WifiIdentity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -79,6 +91,19 @@ data class NetworkState(
     val ipList: List<IpInfo> = emptyList(),
     val isWifiConnected: Boolean = false
 )
+
+/**
+ * 首页 WiFi 身份缓存（跨重组/多次网络回调保留）：
+ * Android 9+ 应用层 WifiInfo 的 SSID 受定位开关限制（关闭时恒为
+ * <unknown ssid>），导致状态卡在「WiFi已连接」与「已连接 xxx」间跳变。
+ * 同一网络（netId 一致）沿用缓存结果 + 特权通道兑底（cmd wifi status
+ * 不受定位限制），保证显示稳定一致。
+ */
+private object HomeWifiCache {
+    var ssid: String = ""
+    var netId: Int = -1
+    var lastShellTryAt: Long = 0L   // 特权通道解析节流（网络回调高频触发）
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -107,20 +132,41 @@ fun HomeScreen(onMenuClick: () -> Unit) {
                 var ssid = context.getString(R.string.not_connected)
                 var isWifi = false
 
-                if (caps != null) {
-                    if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
-                        isWifi = true
-                        val info = wifiManager.connectionInfo
-                        val rawSsid = info.ssid
-                        ssid =
-                            if (rawSsid == "<unknown ssid>") context.getString(R.string.wifi_connected_generic) else "${
-                                context.getString(R.string.wifi_connected_to)
-                            } ${
-                                rawSsid.trim('"')
-                            }"
-                    } else if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) {
-                        ssid = context.getString(R.string.mobile_data)
+                if (caps != null && caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
+                    isWifi = true
+                    val info = wifiManager.connectionInfo
+                    val rawSsid = info?.ssid?.removeSurrounding("\"").orEmpty()
+                    val netId = info?.networkId ?: -1
+                    var resolved =
+                        if (rawSsid.isNotEmpty() && rawSsid != "<unknown ssid>") rawSsid else ""
+                    // ① 定位开关导致 SSID 被系统屏蔽时：同一网络（netId 一致）
+                    //    沿用缓存，消除「WiFi已连接/已连接 xxx」来回跳变
+                    if (resolved.isEmpty() && netId >= 0 &&
+                        HomeWifiCache.netId == netId && HomeWifiCache.ssid.isNotEmpty()
+                    ) {
+                        resolved = HomeWifiCache.ssid
                     }
+                    // ② 仍拿不到 → 特权通道兑底（cmd wifi status 不受定位开关限制）；
+                    //    onCapabilitiesChanged 随信号强度高频回调，10s 节流
+                    if (resolved.isEmpty() &&
+                        System.currentTimeMillis() - HomeWifiCache.lastShellTryAt > 10_000
+                    ) {
+                        HomeWifiCache.lastShellTryAt = System.currentTimeMillis()
+                        resolved = WifiIdentity.resolve(context.applicationContext, app).first
+                    }
+                    if (resolved.isNotEmpty()) {
+                        HomeWifiCache.ssid = resolved
+                        HomeWifiCache.netId = netId
+                    }
+                    ssid = if (resolved.isEmpty()) context.getString(R.string.wifi_connected_generic)
+                    else "${context.getString(R.string.wifi_connected_to)} $resolved"
+                } else if (caps != null && caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) {
+                    ssid = context.getString(R.string.mobile_data)
+                }
+                // WiFi 已断开：清缓存，重连后重新解析（避免残留旧网络名）
+                if (caps == null || !caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
+                    HomeWifiCache.ssid = ""
+                    HomeWifiCache.netId = -1
                 }
                 NetworkState(ssid, getAllIpAddresses(), isWifi)
             }
@@ -215,11 +261,13 @@ fun HomeScreen(onMenuClick: () -> Unit) {
                     modifier = Modifier.padding(start = 4.dp, top = 8.dp)
                 )
 
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        HomeCardItem(
+                // Apple 主屏风格网格：4 列等宽图标瓦片（圆角方块图标 + 下方短标签），
+                // 按压无涟漪、瓦片弹性缩放（iOS 图标按压反馈）；末行左对齐（iOS 排列习惯）
+                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Row(Modifier.fillMaxWidth()) {
+                        QuickActionTile(
                             modifier = Modifier.weight(1f),
-                            title = stringResource(R.string.nav_pojie),
+                            title = stringResource(R.string.tile_pojie),
                             icon = Icons.Rounded.VpnKey,
                             baseColor = Color(0xFFFFD8E4),
                             darkColor = Color(0xFF5E2A38),
@@ -227,9 +275,19 @@ fun HomeScreen(onMenuClick: () -> Unit) {
                             isDark = isDark,
                             onClick = { navTarget.value = "Pojie" }
                         )
-                        HomeCardItem(
+                        QuickActionTile(
                             modifier = Modifier.weight(1f),
-                            title = stringResource(R.string.nav_manager),
+                            title = stringResource(R.string.tile_guard),
+                            icon = Icons.Rounded.MonitorHeart,
+                            baseColor = Color(0xFFD3F4DC),
+                            darkColor = Color(0xFF1F3D28),
+                            contentColor = if (isDark) Color(0xFFD3F4DC) else Color(0xFF2F6B3F),
+                            isDark = isDark,
+                            onClick = { navTarget.value = "Guard" }
+                        )
+                        QuickActionTile(
+                            modifier = Modifier.weight(1f),
+                            title = stringResource(R.string.tile_manager),
                             icon = Icons.Rounded.Dns,
                             baseColor = Color(0xFFFDE495),
                             darkColor = Color(0xFF4A3E15),
@@ -237,10 +295,7 @@ fun HomeScreen(onMenuClick: () -> Unit) {
                             isDark = isDark,
                             onClick = { navTarget.value = "Viewer" }
                         )
-                    }
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        HomeCardItem(
+                        QuickActionTile(
                             modifier = Modifier.weight(1f),
                             title = stringResource(R.string.nav_test),
                             icon = Icons.Rounded.Science,
@@ -248,13 +303,11 @@ fun HomeScreen(onMenuClick: () -> Unit) {
                             darkColor = Color(0xFF3E1C4A),
                             contentColor = if (isDark) Color(0xFFF2D9FA) else Color(0xFF4A148C),
                             isDark = isDark,
-                            isHorizontal = true,
                             onClick = { navTarget.value = "Test" }
                         )
                     }
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        HomeCardItem(
+                    Row(Modifier.fillMaxWidth()) {
+                        QuickActionTile(
                             modifier = Modifier.weight(1f),
                             title = stringResource(R.string.nav_settings),
                             icon = Icons.Rounded.Settings,
@@ -262,9 +315,12 @@ fun HomeScreen(onMenuClick: () -> Unit) {
                             darkColor = Color(0xFF4A2C20),
                             contentColor = if (isDark) Color(0xFFFFE0C8) else Color(0xFF5D4037),
                             isDark = isDark,
-                            isHorizontal = true,
                             onClick = { navTarget.value = "Settings" }
                         )
+                        // 空位保持列宽对齐（iOS 主屏末行左对齐）
+                        Spacer(Modifier.weight(1f))
+                        Spacer(Modifier.weight(1f))
+                        Spacer(Modifier.weight(1f))
                     }
                 }
             }
@@ -405,8 +461,12 @@ fun AidlStatusCard(isDark: Boolean) {
 
 }
 
+/**
+ * Apple 主屏风格快捷操作瓦片：60dp 圆角方块图标 + 下方短标签。
+ * 按压反馈对齐 iOS：无涟漪，图标瓦片弹性缩放（collectIsPressedAsState 驱动）。
+ */
 @Composable
-fun HomeCardItem(
+private fun QuickActionTile(
     modifier: Modifier = Modifier,
     title: String,
     icon: ImageVector,
@@ -414,73 +474,59 @@ fun HomeCardItem(
     darkColor: Color,
     contentColor: Color,
     isDark: Boolean,
-    isHorizontal: Boolean = false,
     onClick: () -> Unit
 ) {
-    val finalBgColor = if (isDark) darkColor.copy(alpha = 0.4f) else baseColor
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) 0.88f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "tileScale"
+    )
+    val bgColor = if (isDark) darkColor.copy(alpha = 0.4f) else baseColor
 
-
-    Surface(
-        onClick = onClick,
-        color = finalBgColor,
-        shape = RoundedCornerShape(20.dp),
-        modifier = modifier.height(if (isHorizontal) 72.dp else 110.dp)
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = modifier
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                role = Role.Button,
+                onClick = onClick
+            )
+            .padding(horizontal = 4.dp, vertical = 4.dp)
     ) {
-        if (isHorizontal) {
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 20.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        icon,
-                        contentDescription = null,
-                        tint = contentColor,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(16.dp))
-                    Text(
-                        text = title,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = contentColor
-                    )
+        Box(
+            modifier = Modifier
+                .size(60.dp)
+                .graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
                 }
-                Icon(
-                    Icons.AutoMirrored.Rounded.ArrowForwardIos,
-                    contentDescription = null,
-                    tint = contentColor.copy(alpha = 0.5f),
-                    modifier = Modifier.size(16.dp)
-                )
-            }
-        } else {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.SpaceBetween,
-                horizontalAlignment = Alignment.Start
-            ) {
-                Icon(
-                    icon,
-                    contentDescription = null,
-                    tint = contentColor,
-                    modifier = Modifier.size(28.dp)
-                )
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = contentColor
-                )
-            }
+                .background(bgColor, RoundedCornerShape(16.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                icon,
+                contentDescription = title,
+                tint = contentColor,
+                modifier = Modifier.size(30.dp)
+            )
         }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = title,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onBackground,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
-
-
 }
 
 data class IpInfo(

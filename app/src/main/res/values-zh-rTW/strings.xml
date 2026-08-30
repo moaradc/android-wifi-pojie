@@ -247,6 +247,7 @@
     <string name="guard_log_save_desc">儲存日誌到檔案</string>
     <string name="guard_log_export_desc">匯出日誌（分享）</string>
     <string name="guard_log_manage_desc">管理已儲存日誌</string>
+    <string name="guard_log_expand_desc">展開/收起</string>
     <string name="guard_log_share_desc">分享</string>
     <string name="guard_log_delete_desc">刪除</string>
     <string name="guard_log_file_header">WiFi工具箱 網路守護日誌</string>
@@ -564,6 +565,9 @@
     <string name="nav_manager">WiFi 管理器</string>
     <string name="nav_test">實驗室</string>
     <string name="nav_settings">設定</string>
+    <string name="tile_pojie">破解</string>
+    <string name="tile_guard">守護</string>
+    <string name="tile_manager">管理器</string>
     <string name="found_saved_password">發現已儲存密碼</string>
     <string name="found_saved_password_tip">系統已存在該 WiFi 的配置資訊，是否直接嘗試連接？</string>
     <string name="re_run">重新執行</string>
