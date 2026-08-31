@@ -281,7 +281,7 @@
     <string name="guard_fail_threshold">Debounce threshold</string>
     <string name="guard_fail_threshold_tip">Trigger reconnect after %1$d consecutive failures, avoiding false positives</string>
     <string name="guard_cat_timing">When to check</string>
-    <string name="guard_interval">Interval (preset)</string>
+    <string name="guard_interval">Interval</string>
     <string name="guard_interval_value">%1$d seconds</string>
     <string name="guard_interval_custom_value">Custom %1$d seconds</string>
     <string name="guard_interval_custom">Custom interval…</string>
@@ -308,7 +308,7 @@
     <string name="guard_heal_verify_timeout">Verify timeout after reconnect</string>
     <string name="guard_sec_value">%1$ds</string>
     <string name="guard_cooldown_base">Backoff base</string>
-    <string name="guard_cooldown_base_tip">Fixed wait of %1$ds before retrying after a failed heal (no doubling); runaway retries are capped separately</string>
+    <string name="guard_cooldown_base_tip">Fixed wait of %1$ds before retrying after a failed heal</string>
     <string name="guard_heal_channel">Heal channel</string>
     <string name="guard_channel_auto">Auto (Shizuku→Root→API)</string>
     <string name="guard_channel_aidl">Root AIDL</string>

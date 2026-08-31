@@ -284,7 +284,7 @@
     <string name="guard_fail_threshold_tip">连续失败 %1$d 次才判定断网，避免网络抖动误触发重连</string>
 
     <string name="guard_cat_timing">检测时机</string>
-    <string name="guard_interval">检测间隔（预设）</string>
+    <string name="guard_interval">检测间隔</string>
     <string name="guard_interval_value">%1$d 秒</string>
     <string name="guard_interval_custom_value">自定义 %1$d 秒</string>
     <string name="guard_interval_custom">自定义间隔…</string>
@@ -312,7 +312,7 @@
     <string name="guard_heal_verify_timeout">重连后验证超时</string>
     <string name="guard_sec_value">%1$ds</string>
     <string name="guard_cooldown_base">退避基数</string>
-    <string name="guard_cooldown_base_tip">自愈失败后固定等待 %1$ds 再重试（不再翻倍）；防空转由重试上限负责</string>
+    <string name="guard_cooldown_base_tip">自愈失败后固定等待 %1$ds 再重试</string>
     <string name="guard_heal_channel">自愈执行通道</string>
     <string name="guard_channel_auto">自动（Shizuku→Root→API）</string>
     <string name="guard_channel_aidl">Root AIDL</string>
