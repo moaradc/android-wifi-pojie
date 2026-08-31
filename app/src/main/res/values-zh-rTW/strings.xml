@@ -321,6 +321,8 @@
     <string name="guard_stat_reset_confirm">全部統計數據與事件歷史將清零，且無法復原。確定繼續？</string>
     <string name="guard_stat_reset_desc">清零全部統計與事件</string>
     <string name="guard_log_started">守護啟動，每 %1$ds 檢測一次</string>
+    <string name="guard_log_restarted">守護程序被系統回收，已自動恢復偵測</string>
+    <string name="guard_log_doze_skip">系統深度休眠（Doze）網路受限，本輪探測結果不可靠，暫不判定斷網</string>
     <string name="guard_log_check_error">檢測異常</string>
     <string name="guard_log_online">線上 ✓ %1$s</string>
     <string name="guard_log_offline_count">離線判定 %1$d/%2$d（%3$s）</string>

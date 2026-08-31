@@ -10,6 +10,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
+import android.app.AlarmManager
 import android.net.ConnectivityManager
 import android.net.wifi.WifiManager
 import android.os.Build
@@ -129,6 +130,11 @@ class GuardService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // START_STICKY 重启（进程被系统/ROM 回收后拉起）携带 null intent：
+        // 如实记日志，用户可据此判断后台存活状况（配合心跳闹钟自动恢复）
+        if (intent == null) {
+            log(getString(R.string.guard_log_restarted), GuardLog.LEVEL_INFO)
+        }
         when (intent?.action) {
             ACTION_STOP -> {
                 stopSelf()
@@ -137,6 +143,22 @@ class GuardService : Service() {
             ACTION_RUN_CHECK -> {
                 // 手动"立即检测"
                 scope.launch { runOneCheck(manual = true) }
+            }
+            ACTION_HEARTBEAT -> {
+                // 心跳兜底：Doze 忽略非白名单应用的唤醒锁会使协程 delay 定时器冻结，
+                // 主循环失速超过 1.5 倍间隔时补一轮检测（闹钟触发自带临时白名单
+                // 与短暂唤醒窗口，探测可在窗口内完成）；进程被杀场景 onStartCommand
+                // 本身已重建前台服务与主循环
+                val intervalMs = settings.checkIntervalSec * 1000L
+                val last = GuardState.lastCheckTime
+                if (last <= 0L || System.currentTimeMillis() - last > intervalMs * 3 / 2) {
+                    scope.launch {
+                        try {
+                            runOneCheck()
+                        } catch (_: Exception) {
+                        }
+                    }
+                }
             }
             ACTION_RELOAD -> {
                 reloadSettings()
@@ -151,6 +173,10 @@ class GuardService : Service() {
         if (loopJob == null || loopJob?.isActive != true) {
             loopJob = scope.launch { guardLoop() }
         }
+
+        // 心跳闹钟自续期：所有存活路径（含 START_STICKY 重启/热加载）统一重排，
+        // 同一 PendingIntent 自动替换旧闹钟；用户停止走 onDestroy 取消
+        scheduleHeartbeat()
         return START_STICKY
     }
 
@@ -163,6 +189,66 @@ class GuardService : Service() {
             // 依然必须 startForeground（前台服务类型要求），但用最低优先级
             startForeground(NOTIF_ID, buildNotification(null, silent = true))
         }
+    }
+
+    // ==================== 心跳闹钟看门狗 ====================
+
+    /**
+     * 免特权后台兜底（默认配置即生效，无需 Shizuku/Root 一键保活）：
+     *
+     * 根因一（深度 Doze）：Android 对未进 Doze 白名单的应用忽略 PARTIAL_WAKE_LOCK，
+     * 息屏静止约 30 分钟后 CPU 深睡，协程 delay 定时器冻结——「后台不检测」。
+     * setAndAllowWhileIdle 闹钟在 Doze 中照常触发（每应用约 9 分钟限流一次，
+     * 系统静默推迟不报错），触发时短暂唤醒 CPU 并给予临时白名单窗口。
+     * 根因二（ROM 杀进程）：MIUI/HyperOS 等对未加白应用的进程查杀后，
+     * START_STICKY 若被拦截，PendingIntent.getForegroundService 闹钟仍可拉起
+     * 服务（targetSdk=28 不受 Android 12+ 后台启动前台服务限制）；
+     * force-stop 语义会连闹钟一并取消，属系统级终止，仅能靠电池优化豁免/保活命令。
+     *
+     * 下限 60s 兼顾电池（正常态主循环自己跑，心跳仅作失速看门狗，
+     * 触发时检测新鲜则只重排闹钟不检测）；非精确闹钟允许系统合并唤醒。
+     */
+    private fun scheduleHeartbeat() {
+        val am = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val intervalSec = maxOf(settings.checkIntervalSec, HEARTBEAT_MIN_SEC)
+        val at = System.currentTimeMillis() + intervalSec * 1000L
+        val pi = heartbeatPendingIntent()
+        try {
+            am.cancel(pi)
+        } catch (_: Exception) {
+        }
+        try {
+            am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi)
+        } catch (_: Exception) {
+            // 个别 ROM 禁用 while-idle：回退普通闹钟（Doze 中会被推迟到维护窗口，
+            // 聊胜于无）
+            try {
+                am.set(AlarmManager.RTC_WAKEUP, at, pi)
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    private fun heartbeatPendingIntent(): PendingIntent =
+        PendingIntent.getForegroundService(
+            this, HEARTBEAT_PI_CODE,
+            Intent(this, GuardService::class.java).apply { action = ACTION_HEARTBEAT },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+    private fun cancelHeartbeat() {
+        try {
+            (getSystemService(Context.ALARM_SERVICE) as AlarmManager)
+                .cancel(heartbeatPendingIntent())
+        } catch (_: Exception) {
+        }
+    }
+
+    /** 系统是否处于深度 Doze（此刻网络防火墙对非白名单应用生效） */
+    private fun isDeviceIdle(): Boolean = try {
+        (getSystemService(Context.POWER_SERVICE) as PowerManager).isDeviceIdleMode
+    } catch (_: Exception) {
+        false
     }
 
     // ==================== 主循环 ====================
@@ -251,6 +337,20 @@ class GuardService : Service() {
         val verdict = NetProber.probe(applicationContext, settings) { cmd ->
             healer.shellExec(cmd)
         }
+
+        // 深度 Doze 期间系统防火墙切断非白名单应用网络，探测失败不能归因于
+        // WiFi 故障：计入失败会误触自愈（重连后验证必失败，污染统计并空转）。
+        // 如实标注本轮不判定，退出 Doze 后下一轮正常检测（临时白名单窗口内
+        // 探测成功则正常走在线分支，不受此影响）
+        if (!verdict.online && !manual && isDeviceIdle()) {
+            if (GuardState.currentState != GuardState.STATE_SUSPECT) {
+                log(getString(R.string.guard_log_doze_skip), GuardLog.LEVEL_WARN)
+            }
+            GuardState.lastCheckTime = System.currentTimeMillis()
+            GuardState.currentState = GuardState.STATE_SUSPECT
+            return
+        }
+
         stats.recordCheck(verdict.online)
 
         val detail = verdict.results.joinToString(", ") { "${it.mode}=${if (it.ok) "OK" else it.detail}" }
@@ -559,6 +659,8 @@ class GuardService : Service() {
         super.onDestroy()
         loopJob?.cancel()
         scope.cancel()
+        // 停止守护：取消心跳闹钟（防在途闹钟把已停止的服务拉起复活）
+        cancelHeartbeat()
         // 最终落盘：开启自动保存时把残留未保存日志写入文件（服务被停止的场景）
         try {
             autoSaveFlush()
@@ -593,6 +695,13 @@ class GuardService : Service() {
         const val ACTION_STOP = "com.wifi.toolbox.guard.STOP"
         const val ACTION_RUN_CHECK = "com.wifi.toolbox.guard.CHECK"
         const val ACTION_RELOAD = "com.wifi.toolbox.guard.RELOAD"
+        const val ACTION_HEARTBEAT = "com.wifi.toolbox.guard.HEARTBEAT"
+
+        /** 心跳闹钟 PendingIntent 请求码（与通知按钮 10/11/20/21 不冲突） */
+        const val HEARTBEAT_PI_CODE = 30
+
+        /** 心跳闹钟下限间隔（秒）：正常态主循环自跑，心跳仅作看门狗 */
+        const val HEARTBEAT_MIN_SEC = 60
 
         /** 自动保存日志滚动文件保留个数（guard-auto-*.log，跨天时清理） */
         const val AUTO_SAVE_KEEP = 30

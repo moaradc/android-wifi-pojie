@@ -322,6 +322,8 @@
     <string name="guard_stat_reset_confirm">All statistics and event history will be cleared and cannot be undone. Continue?</string>
     <string name="guard_stat_reset_desc">Reset all stats and events</string>
     <string name="guard_log_started">Guard started, checking every %1$ds</string>
+    <string name="guard_log_restarted">Guard process was reclaimed by the system, detection resumed automatically</string>
+    <string name="guard_log_doze_skip">Deep Doze is restricting network, probe results unreliable this round, skipping offline verdict</string>
     <string name="guard_log_check_error">Check error</string>
     <string name="guard_log_online">Online ✓ %1$s</string>
     <string name="guard_log_offline_count">Offline %1$d/%2$d (%3$s)</string>

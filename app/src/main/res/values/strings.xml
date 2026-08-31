@@ -329,6 +329,8 @@
     <string name="guard_stat_reset_desc">清零全部统计与事件</string>
 
     <string name="guard_log_started">守护启动，每 %1$ds 检测一次</string>
+    <string name="guard_log_restarted">守护进程被系统回收，已自动恢复检测</string>
+    <string name="guard_log_doze_skip">系统深度休眠（Doze）网络受限，本轮探测结果不可靠，暂不判定断网</string>
     <string name="guard_log_check_error">检测异常</string>
     <string name="guard_log_online">在线 ✓ %1$s</string>
     <string name="guard_log_offline_count">离线判定 %1$d/%2$d（%3$s）</string>
