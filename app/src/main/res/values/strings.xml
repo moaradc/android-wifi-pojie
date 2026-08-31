@@ -129,6 +129,9 @@
     <string name="mgr_channel_root_binding">正在绑定 Root 服务…</string>
     <string name="mgr_channel_root_bind_fail">Root 服务绑定失败：未授权或设备无 Root</string>
     <string name="mgr_channel_api_no_location">缺定位权限 · 选择后申请</string>
+    <string name="mgr_channel_api_loc_off">定位服务未开启 · 选择后引导开启</string>
+    <string name="mgr_channel_loc_service_off">定位服务未开启，未切换</string>
+    <string name="mgr_channel_loc_service_goto">即将跳转系统定位设置，请开启「位置信息」后返回重试</string>
     <string name="mgr_channel_perm_denied">未获得授权，未切换</string>
     <string name="mgr_channel_switched">已切换来源：%1$s</string>
     <string name="mgr_channel_loc_settings_title">无法自动申请定位权限</string>
@@ -214,7 +217,7 @@
     <string name="mgr_lbl_roaming">漫游</string>
     <string name="mgr_yes">是</string>
     <string name="mgr_no">否</string>
-    <string name="mgr_bssid_hidden">BSSID 已被系统隐藏（开启系统定位或授权 Shizuku/Root 后可显示）</string>
+    <string name="mgr_bssid_hidden">BSSID 已被系统隐藏（开启定位或授权特权通道后可显示）</string>
     <string name="app">应用</string>
     <string name="home">主页</string>
     <string name="toolbox">工具箱</string>

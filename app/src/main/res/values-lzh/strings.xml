@@ -127,6 +127,9 @@
     <string name="mgr_channel_root_binding">正繫 Root 之役…</string>
     <string name="mgr_channel_root_bind_fail">Root 之役繫之不成：未許或機無 Root</string>
     <string name="mgr_channel_api_no_location">缺定位之權 · 擇之則請</string>
+    <string name="mgr_channel_api_loc_off">定位未啟 · 擇之則導啟</string>
+    <string name="mgr_channel_loc_service_off">定位未啟，道不易</string>
+    <string name="mgr_channel_loc_service_goto">將往定位之設，啟「位置」後歸而再試</string>
     <string name="mgr_channel_perm_denied">未得其許，道不易</string>
     <string name="mgr_channel_switched">已易其源：%1$s</string>
     <string name="mgr_channel_loc_settings_title">定位之權未能自請</string>
@@ -212,7 +215,7 @@
     <string name="mgr_lbl_roaming">漫游</string>
     <string name="mgr_yes">然</string>
     <string name="mgr_no">否</string>
-    <string name="mgr_bssid_hidden">BSSID 為系統所隱（啟定位或授 Shizuku/Root 之權方可示之）</string>
+    <string name="mgr_bssid_hidden">BSSID 為系統所隱（啟定位或授特權之途方可示之）</string>
     <string name="app">此物</string>
     <string name="home">归处</string>
     <string name="toolbox">百宝箱</string>

@@ -7,6 +7,7 @@ import android.net.Uri
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
@@ -56,6 +57,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import com.wifi.toolbox.ui.items.TagItem
 import com.wifi.toolbox.ui.items.TagType
+import com.google.android.gms.common.api.ResolvableApiException
+import com.google.android.gms.location.LocationRequest
+import com.google.android.gms.location.LocationSettingsRequest
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
 import com.wifi.toolbox.utils.*
 
 /**
@@ -184,7 +190,7 @@ private fun SourceChannelTag(
 /**
  * 数据来源通道切换弹窗。
  *
- * - 每通道附可用状态（可用 / 未运行 / 未授权 / 未绑定 / 缺定位权限）；
+ * - 每通道附可用状态（可用 / 未运行 / 未授权 / 未绑定 / 缺定位权限 / 定位服务未开启）；
  * - 选择可用通道：立即切换（写破解设置 scanMode，两页同源）并刷新
  *   **当前停留页**（[refreshScanOnSwitch]：未进入的页面不运行其数据加载，
  *   进入时各自自动加载——扫描是射频级功耗，不应在未停留扫描页时触发）；
@@ -193,7 +199,12 @@ private fun SourceChannelTag(
  *   则保持原通道不切换。即使指定通道不可用，读取也有多通道静默回退
  *   兜底（channelOrder），不会因此取不到数据——弹窗内的权限申请只为
  *   让指定通道真正生效。
- * - 「自动」即 0：按 Shizuku → Root → 系统 API 顺序取首个可用。
+ * - 「自动」即 0：按 Shizuku → Root → 系统 API 顺序取首个可用；
+ * - 系统 API 的可用 = 定位权限 + 系统定位开关双就绪（官方文档 Android 9+
+ *   硬性条件 "Location services are enabled on the device"——权限≠开关，
+ *   开关关闭时应用层读数恒为空，此前误报「可用」且切了仍静默降级
+ *   Shizuku）：权限到手而开关未开时先引导开启（Play services 一键
+ *   开启弹窗，无 GMS 跳系统定位设置页），开启后切换、不开不切换。
  */
 @Composable
 private fun SourceChannelPickerDialog(
@@ -213,7 +224,13 @@ private fun SourceChannelPickerDialog(
     val shizukuAlive = remember(availTick) { shizukuBinderAlive() }
     val shizukuGranted = remember(availTick) { WifiHealer.isShizukuAvailable() }
     val rootBound = app.aidl.ipc != null      // Compose 状态：绑定完成自动重组
-    val apiOk = remember(availTick) { ApiUtil.hasLocationPermission(context) }
+    // API 通道可用 = 定位权限 + 系统定位开关双就绪：开关是官方文档明载的
+    // 硬性条件（Android 9 起 "Location services are enabled on the device"），
+    // 只查权限会把「定位服务未开启」误报成「可用」——真机「切了系统 API
+    // 标签仍显示 Shizuku」的根因：权限≠开关，开关关闭时应用层读数恒为
+    // 空，读取侧静默降级到特权通道（标签如实显示实际数据源）
+    val apiPerm = remember(availTick) { ApiUtil.hasLocationPermission(context) }
+    val apiLocOn = remember(availTick) { ApiUtil.isLocationEnabled(context) }
     val current = controller.scanChannel
 
     // 「自动」当前实际会选用的通道（与 channelOrder 的自动顺序一致）
@@ -245,6 +262,74 @@ private fun SourceChannelPickerDialog(
     // 永久拒绝（系统不再弹权限框）时引导去应用设置的兜底弹窗
     var showLocationSettings by remember { mutableStateOf(false) }
 
+    // 定位开关引导（一键开启弹窗）的回收：开启成功 → 切换；取消 → 不切换
+    // （避免「切了却读不到数、标签来回跳」——读取层的降级兜底仍会保住数据）
+    val locSvcLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        availTick++
+        if (result.resultCode == Activity.RESULT_OK && ApiUtil.isLocationEnabled(context)) {
+            applyAndDismiss(3)
+        } else {
+            Toast.makeText(
+                context, context.getString(R.string.mgr_channel_loc_service_off),
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+
+    // 无 GMS（国产 ROM 常见）或不可解析时：Toast 提示后跳系统定位设置页，
+    // 用户开启后返回重新选择即可（此时状态行已如实显示「定位服务未开启」）
+    fun gotoLocationSettings() {
+        Toast.makeText(
+            context, context.getString(R.string.mgr_channel_loc_service_goto),
+            Toast.LENGTH_LONG
+        ).show()
+        try {
+            context.startActivity(
+                Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        } catch (_: Exception) {
+        }
+    }
+
+    /**
+     * 引导开启系统定位开关：优先 Play services「一键开启」可解析弹窗
+     * （checkLocationSettings → ResolvableApiException → resolution），
+     * 结果由 [locSvcLauncher] 回收；不可解析时跳系统设置页。此处不做切换。
+     */
+    fun promptEnableLocation() {
+        try {
+            val locationRequest = LocationRequest.Builder(
+                Priority.PRIORITY_HIGH_ACCURACY, 10000
+            ).build()
+            val request = LocationSettingsRequest.Builder()
+                .addLocationRequest(locationRequest)
+                .setAlwaysShow(true)
+                .build()
+            LocationServices.getSettingsClient(context).checkLocationSettings(request)
+                .addOnSuccessListener {
+                    // 与弹窗预检查的竞态兜底：走到这里说明系统认为已开启
+                    if (ApiUtil.isLocationEnabled(context)) applyAndDismiss(3)
+                    else gotoLocationSettings()
+                }
+                .addOnFailureListener { ex ->
+                    val sender = (ex as? ResolvableApiException)?.resolution?.intentSender
+                    if (sender != null) {
+                        try {
+                            locSvcLauncher.launch(IntentSenderRequest.Builder(sender).build())
+                            return@addOnFailureListener
+                        } catch (_: Exception) {
+                        }
+                    }
+                    gotoLocationSettings()
+                }
+        } catch (_: Exception) {
+            gotoLocationSettings()
+        }
+    }
+
     // FINE+COARSE 双权限同请求：官方文档明确 Android 12+ 单独请求
     // ACCESS_FINE_LOCATION 会被部分版本系统直接忽略（不弹任何对话框）
     // ——真机反馈「切系统API未申请定位权限」的根因；且 targetSdk=28 下
@@ -257,7 +342,10 @@ private fun SourceChannelPickerDialog(
         val fine = grants[Manifest.permission.ACCESS_FINE_LOCATION] == true
         val coarse = grants[Manifest.permission.ACCESS_COARSE_LOCATION] == true
         if (fine || coarse) {
-            applyAndDismiss(3)
+            // 权限到手仍需定位开关就绪（Android 9+ 官方硬性条件）：
+            // 开着直接切换；关着先引导开启，开启后切换
+            if (ApiUtil.isLocationEnabled(context)) applyAndDismiss(3)
+            else promptEnableLocation()
         } else {
             // 区分普通拒绝（可再次弹窗）与永久拒绝（只能去设置手动开）
             val act = context as? Activity
@@ -337,13 +425,18 @@ private fun SourceChannelPickerDialog(
                 }
             }
 
-            3 -> if (apiOk) applyAndDismiss(3)
-            else locationLauncher.launch(
-                arrayOf(
-                    Manifest.permission.ACCESS_FINE_LOCATION,
-                    Manifest.permission.ACCESS_COARSE_LOCATION
+            3 -> when {
+                // 实时判定（remember 缓存从系统设置页返回后可能滞后）：
+                // 权限缺 → 申请；权限有开关关 → 引导开启；都就绪 → 切换
+                !ApiUtil.hasLocationPermission(context) -> locationLauncher.launch(
+                    arrayOf(
+                        Manifest.permission.ACCESS_FINE_LOCATION,
+                        Manifest.permission.ACCESS_COARSE_LOCATION
+                    )
                 )
-            )
+                ApiUtil.isLocationEnabled(context) -> applyAndDismiss(3)
+                else -> promptEnableLocation()
+            }
         }
     }
 
@@ -388,12 +481,16 @@ private fun SourceChannelPickerDialog(
                     showProgress = bindingRoot,
                     onClick = { selectChannel(2) }
                 )
-                // 系统 API
+                // 系统 API（可用 = 定位权限 + 系统定位开关双就绪，缺一
+                // 分别如实显示对应状态而非笼统的「缺定位权限」）
                 ChannelRow(
                     name = stringResource(R.string.api_wifimanager),
-                    status = if (apiOk) stringResource(R.string.mgr_channel_status_ok)
-                    else stringResource(R.string.mgr_channel_api_no_location),
-                    statusInfo = apiOk,
+                    status = when {
+                        !apiPerm -> stringResource(R.string.mgr_channel_api_no_location)
+                        !apiLocOn -> stringResource(R.string.mgr_channel_api_loc_off)
+                        else -> stringResource(R.string.mgr_channel_status_ok)
+                    },
+                    statusInfo = apiPerm && apiLocOn,
                     selected = current == 3,
                     enabled = !bindingRoot,
                     onClick = { selectChannel(3) }

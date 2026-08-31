@@ -32,6 +32,8 @@ import kotlinx.coroutines.launch
  * 3 = 系统应用层 API（targetSdk=28 豁免）。查询型操作（读列表/读详情）
  * 在指定通道结果为空时**自动降级补一次其他通道**——管理器是只读查询，
  * 静默降级比弹授权引导更符合场景；实际使用的通道记录在 source 中如实展示。
+ * 注意系统 API 通道（3）能否出数据取决于「定位权限 + 系统定位开关」
+ * 双条件（见 channelOrder），缺任一都会静默降级到特权通道。
  *
  * 【已保存网络密码的分级可见性】（Android 10+ 官方限制：
  * getConfiguredNetworks() 对所有应用返回空列表，包括 targetSdk<29 的应用，
@@ -266,14 +268,28 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
 
     val badSsids = setOf("<unknown ssid>", "<none>", "unknown ssid", "0x")
 
-    /** 候选通道序列：指定通道优先，其余可用通道按特权级别补位（0=未设置时自动选） */
+    /**
+     * 候选通道序列：指定通道优先，其余可用通道按特权级别补位（0=未设置时自动选）。
+     *
+     * 系统 API 通道的可用条件是定位权限 + 系统定位开关双就绪：官方文档
+     * （Wi-Fi scanning）明确 Android 9 起 startScan/getScanResults 的硬性
+     * 条件包含 "Location services are enabled on the device"——权限已授
+     * 但开关关闭时应用层读数恒为空列表，而 Shizuku/Root 特权读同一系统
+     * 扫描缓冲不受此过滤（这正是「切到系统 API 标签却显示 Shizuku」的
+     * 根因：空结果触发静默降级）。指定通道当前不满足可用条件时不置于
+     * 尝试序列首位，省一次注定为空的读。
+     */
     fun channelOrder(): List<Int> {
         val primary = settingsState.value.scanMode
         val rest = mutableListOf<Int>()
         if (WifiHealer.isShizukuAvailable()) rest += 1
         if (app.aidl.ipc != null) rest += 2
-        if (ApiUtil.hasLocationPermission(context)) rest += 3
-        val effectivePrimary = if (primary != 0) primary else rest.firstOrNull() ?: 3
+        if (ApiUtil.hasLocationPermission(context) && ApiUtil.isLocationEnabled(context)) rest += 3
+        val effectivePrimary = when {
+            primary != 0 && primary in rest -> primary      // 指定通道可用：尊重指定
+            primary != 0 -> rest.firstOrNull() ?: primary   // 指定通道当前不可用：退回可用序列
+            else -> rest.firstOrNull() ?: 3                 // 自动：特权降序首个
+        }
         return listOf(effectivePrimary) + rest.filter { it != effectivePrimary }
     }
 
