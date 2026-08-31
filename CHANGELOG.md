@@ -1,3 +1,10 @@
+# v3.0.0_Alpha-07
+
+- 修复：错误密码连接报「超时」而非「认证失败」且不自动忘记（Alpha-27 遗留）——根因经 AOSP 源码考证：① 官方认证失败广播未使用：系统 WiFi 设置显示「密码错误」的同源信号是 SUPPLICANT_STATE_CHANGED_ACTION 广播携带 EXTRA_SUPPLICANT_ERROR = ERROR_AUTHENTICATING（wpa_supplicant 判定 4 次握手失败/关联被拒为密码错误 → AUTHENTICATION_FAILURE_EVENT → 紧随的状态广播打上认证失败标记），现已实时监听该广播（sticky 残留防护：注册后 800ms 内的回调全部丢弃），密码错误最快约 1 秒即报「认证失败」；② SCANNING 状态被漏判：密码错误重试循环中 supplicant 主状态为 SCANNING（AOSP SupplicantState.isHandshakeState 不含 SCANNING，框架握手环回 >4 次禁用网络后更停留在 SCANNING/INACTIVE），原失败判定只认 DISCONNECTED/INACTIVE 导致信号永远凑不齐而等满 20s 超时；③ 无定位权限盲区：SSID 被屏蔽为 <unknown ssid> 时关联判定恒 false，现特权通道解析出目标 SSID 且握手未完成同样计入关联回合（≥3 回合判败）；④ 超时兜底自动忘记：个别 ROM 不产生标准失败信号时，超时且本次为应用新建的配置同样自动忘记，错误密码配置绝不残留系统（已存在的用户配置仍不误删）
+- 新增：扫描页已连接网络卡片显示「忘记网络」按钮（带二次确认对话框）——重复连接无意义但忘记（如路由器改密码后重连）是高频需求；忘记后扫描列表「已保存」标记同步消失
+- 优化：网络页多网络卡片自动折叠后的展开/收起补上流畅动画——高度变化用 animateContentSize 无弹跳平滑过渡（与扫描页卡片同款成熟方案），折叠指示箭头同步无弹跳旋转 180°（原为静态箭头瞬间切换）
+- 版本：应用版本号回退为 v3.0.0_Alpha-07 / versionCode 6（按要求重新发布，覆盖旧 Alpha-07 Release）
+
 # v3.0.0_Alpha-27
 
 - 优化：扫描页/已保存页「当前网络」卡片高亮色柔化——原纯 primaryContainer 高亮真机观感过于鲜艳（虽跟随主题但饱和度过高），现改为 primaryContainer 与 surfaceContainer 按 35:65 混合取色，仍随主题变化但观感柔和，两个页面统一

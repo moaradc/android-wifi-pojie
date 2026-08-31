@@ -4,6 +4,7 @@ import android.content.Intent
 import android.provider.Settings
 import android.widget.Toast
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.Spring
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -26,6 +27,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -138,6 +140,9 @@ private fun ScanTabPage(controller: ManagerController, app: ToolboxApp) {
     var pwdDialogSsid by rememberSaveable { mutableStateOf<String?>(null) }
     var pwdDialogSec by rememberSaveable { mutableStateOf("") }
     var pwdInput by rememberSaveable { mutableStateOf("") }
+    // 已连接网络的「忘记网络」确认对话框（真机反馈：已连接卡片需要忘记入口，
+    // 重复连接无意义但忘记是高频需求——如改密码后重连）
+    var confirmForget by rememberSaveable { mutableStateOf<String?>(null) }
 
     // 进入页面自动扫一轮
     LaunchedEffect(Unit) { controller.refreshScan() }
@@ -148,6 +153,44 @@ private fun ScanTabPage(controller: ManagerController, app: ToolboxApp) {
             Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
             controller.clearOpMessage()
         }
+    }
+
+    // 已连接网络的忘记确认（与已保存页同款二次确认：删除系统配置不可撤销）
+    confirmForget?.let { ssid ->
+        AlertDialog(
+            onDismissRequest = { confirmForget = null },
+            title = { Text(stringResource(R.string.mgr_forget)) },
+            text = {
+                Text(stringResource(R.string.mgr_forget_confirm, ssid))
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    // networkId 从扫描列表合并的系统配置取（当前连接的网络
+                    // 必有系统配置；列表未刷新的瞬态下不显示按钮，不会走到这）
+                    val cfg = controller.scanNetworks
+                        .find { it.ssid == ssid }?.savedInfo
+                    if (cfg != null) {
+                        controller.forgetSaved(
+                            SavedNetworkEntry(
+                                ssid = ssid,
+                                networkId = cfg.networkId,
+                                password = "",
+                                passwordFromPojie = false,
+                                fromSystem = true
+                            )
+                        )
+                    }
+                    confirmForget = null
+                }) {
+                    Text(stringResource(R.string.mgr_forget))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmForget = null }) {
+                    Text(stringResource(R.string.btn_cancel))
+                }
+            }
+        )
     }
 
     // 扫描页卡片「连接」入口：已保存/留有破解密码/开放网络直接连接，
@@ -347,7 +390,8 @@ private fun ScanTabPage(controller: ManagerController, app: ToolboxApp) {
                             onToggle = {
                                 expandedSsid = if (expandedSsid == wifi.ssid) null else wifi.ssid
                             },
-                            onConnect = { connectFromScan(wifi) }
+                            onConnect = { connectFromScan(wifi) },
+                            onForget = { confirmForget = wifi.ssid }
                         )
                     }
                 }
@@ -389,7 +433,8 @@ private fun ScanNetworkCard(
     connecting: Boolean,
     connectEnabled: Boolean,
     onToggle: () -> Unit,
-    onConnect: () -> Unit
+    onConnect: () -> Unit,
+    onForget: () -> Unit
 ) {
     val context = LocalContext.current
     val (band, channel) = freqToBandChannel(wifi.frequency)
@@ -480,12 +525,10 @@ private fun ScanNetworkCard(
                         DetailRow(stringResource(R.string.mgr_lbl_channel), channel.toString())
                     }
                     DetailRow("Security", wifi.capabilities)
-                    // 已连接的网络不再显示「连接」按钮（重复连接无意义，
-                    // 卡片头部已有「当前」标识；其余场景保持原有连接入口）
                     if (!isCurrent) {
+                        // 未连接：连接按钮（已保存/已留密码/开放网络直连，未保存
+                        // 加密网络弹密码输入；连接成功系统自动保存配置）
                         Spacer(Modifier.height(10.dp))
-                        // 连接按钮：已保存/已留密码/开放网络直连，未保存加密网络弹密码输入；
-                        // 连接成功系统自动保存配置（无需再单独保存）
                         Button(
                             onClick = onConnect,
                             enabled = connectEnabled,
@@ -514,6 +557,26 @@ private fun ScanNetworkCard(
                                     style = MaterialTheme.typography.labelMedium
                                 )
                             }
+                        }
+                    } else if (wifi.savedInfo != null) {
+                        // 已连接且有系统配置：忘记网络按钮（真机反馈——已连接
+                        // 卡片重复连接无意义，但「忘记」（如改密码后重连）是
+                        // 高频需求；仅系统有配置时显示，忘记需 networkId）
+                        Spacer(Modifier.height(10.dp))
+                        OutlinedButton(
+                            onClick = onForget,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(
+                                Icons.Rounded.DeleteOutline,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                stringResource(R.string.mgr_forget),
+                                style = MaterialTheme.typography.labelMedium
+                            )
                         }
                     }
                     Spacer(Modifier.height(8.dp))
@@ -1336,8 +1399,10 @@ private fun NetworkTabPage(controller: ManagerController) {
  * - 头部：类型图标 + 类型名（WiFi 网络 / 移动数据网络）+ 认证/验证标签；
  * - 标题行：WiFi 为 SSID、移动数据为运营商名；
  * - 分割线下方详情（WiFi：信号强度/链路速率/频段/信道/IP 等；移动数据：
- *   状态/运营商/漫游）在「多网络同显」时自动折叠，点击卡片展开（静态
- *   指示箭头，无弹性动画）；单网络时常显全部详情。
+ *   状态/运营商/漫游）在「多网络同显」时自动折叠，点击卡片展开/收起——
+ *   高度变化用 animateContentSize 无弹跳平滑过渡（与扫描页卡片同款成熟
+ *   方案），指示箭头同步无弹跳旋转 180°（真机反馈：展开/收起需要流畅
+ *   动画）；单网络时常显全部详情。
  */
 @Composable
 private fun NetworkCard(
@@ -1348,6 +1413,15 @@ private fun NetworkCard(
     portalText: String
 ) {
     val (band, channel) = freqToBandChannel(entry.frequencyMhz)
+    // 箭头随展开态平滑旋转（无弹跳，与卡片高度动画同一节奏语言）
+    val arrowRotation by animateFloatAsState(
+        targetValue = if (expanded) 180f else 0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "netCardArrow"
+    )
 
     Card(
         onClick = onToggle,
@@ -1358,8 +1432,17 @@ private fun NetworkCard(
         ),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(Modifier.padding(18.dp)) {
-            // 头部：类型 + 状态标签 + 折叠指示（静态箭头）
+        Column(
+            Modifier
+                .animateContentSize(
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioNoBouncy,
+                        stiffness = Spring.StiffnessMediumLow
+                    )
+                )
+                .padding(18.dp)
+        ) {
+            // 头部：类型 + 状态标签 + 折叠指示（箭头随展开态平滑旋转）
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     if (entry.isWifi) {
@@ -1392,11 +1475,12 @@ private fun NetworkCard(
                 }
                 if (collapsible) {
                     Icon(
-                        if (expanded) Icons.Rounded.KeyboardArrowUp
-                        else Icons.Rounded.KeyboardArrowDown,
+                        Icons.Rounded.KeyboardArrowDown,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier
+                            .size(20.dp)
+                            .rotate(arrowRotation)
                     )
                 }
             }

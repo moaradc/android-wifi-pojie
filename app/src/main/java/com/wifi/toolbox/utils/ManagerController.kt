@@ -14,6 +14,7 @@ import android.net.NetworkRequest
 import android.net.wifi.SupplicantState
 import android.net.wifi.WifiConfiguration
 import android.net.wifi.WifiManager
+import android.os.SystemClock
 import androidx.compose.runtime.*
 import com.wifi.toolbox.R
 import com.wifi.toolbox.ToolboxApp
@@ -977,14 +978,30 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
              * 而错误密码时关联阶段 SSID 已可读，导致「提示已连接实际永远
              * 连不上」。
              *
-             * 【密码错误快速判定】（系统提示「密码错误」的 wpa_supplicant
-             * reason=15 4WAY_HANDSHAKE_TIMEOUT 同源信号）：
-             * - 目标已进入关联/握手阶段后出现 DISCONNECTED/INACTIVE
-             *   （关联成功却断开 = 被 AP 拒绝，而非不在范围内）≥2 次；
-             * - 或关联尝试回合 ≥3（密码错误时系统反复重试）。
-             * 命中即判认证失败：本次新建的配置（[addedNetId] ≥ 0）自动忘记，
-             * 防止错误密码留存系统导致下次连接按旧配置重试；已存在的用户
-             * 配置不动（仅报「密码可能已更改」类提示）。
+             * 【认证失败三重信号】（真机反馈：错误密码一直等到「超时」，
+             * 从不报「认证失败」且不自动忘记）：
+             * ① 官方认证失败广播（最快，事件驱动）——AOSP
+             *   SupplicantStaIfaceCallbackAidlImpl：4 次握手失败且判定为
+             *   密码错误 / 关联被拒（WPA3 SAE 直接拒绝）→ AUTHENTICATION
+             *   _FAILURE_EVENT → SupplicantStateTracker 将紧随其后的
+             *   SUPPLICANT_STATE_CHANGED_ACTION 广播打上 EXTRA_SUPPLICANT
+             *   _ERROR = ERROR_AUTHENTICATING——即系统 WiFi 设置「密码
+             *   错误」提示的同源信号。广播为 sticky：注册瞬间可能重放
+             *   上次失败残留（注册后 800ms 内的回调全部丢弃，真实握手
+             *   失败最早也要约 1 秒后）；
+             * ② 断开态轮询兼听（中间兜底）——目标进入过关联/握手阶段后
+             *   出现 DISCONNECTED/INACTIVE/SCANNING 连续 2 次。SCANNING
+             *   是密码错误重试循环的主状态（AOSP SupplicantState.isHandshake
+             *   State 不含 SCANNING；框架握手环回 >4 次禁用网络后 supplicant
+             *   更是停留在 SCANNING/INACTIVE）——原实现漏掉 SCANNING 是
+             *   「等满 20s 超时」的直接根因；
+             * ③ 关联回合计数（无定位盲区兜底）——定位权限关闭时应用层
+             *   SSID 恒被屏蔽为 <unknown ssid>，原 engaged 判定恒 false；
+             *   特权解析出目标 SSID 且握手未完成同样计入关联回合（≥3 判败）。
+             *
+             * 【自动忘记闭环】认证失败/超时且本次是应用新建的配置
+             * （addedNetId ≥ 0）→ 自动忘记，防止错误密码残留系统导致下次
+             * 连接按旧配置重试永远连不上；已存在的用户配置不误删。
              *
              * supplicant 状态不受定位权限屏蔽（屏蔽仅作用于 SSID/BSSID），
              * 任何场景都可读；身份在定位关闭时经特权通道解析。
@@ -1003,6 +1020,65 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
                 var wasEngaged = false        // 上一轮轮询是否处于关联阶段（边沿计数）
                 var engagedEpisodes = 0       // 关联尝试回合数（密码错误时递增）
                 var authFailSignals = 0       // 已关联后掉线信号（≥2 次确认，滤瞬态）
+
+                // ---- ① 官方认证失败信号（SUPPLICANT_STATE_CHANGED 广播）----
+                val authErrorSeen = java.util.concurrent.atomic.AtomicBoolean(false)
+                val broadcastSupp = java.util.concurrent.atomic.AtomicReference<SupplicantState?>(null)
+                val receiverRegisteredAt = SystemClock.elapsedRealtime()
+                val supplicantReceiver = object : BroadcastReceiver() {
+                    override fun onReceive(c: Context?, i: Intent?) {
+                        // sticky 残留防护：注册瞬间的重放投递全部丢弃
+                        if (SystemClock.elapsedRealtime() - receiverRegisteredAt < 800) return
+                        try {
+                            @Suppress("DEPRECATION")
+                            val st = i?.getParcelableExtra<SupplicantState>(
+                                WifiManager.EXTRA_NEW_STATE
+                            )
+                            if (st != null) broadcastSupp.set(st)
+                            @Suppress("DEPRECATION")
+                            if (i?.getIntExtra(WifiManager.EXTRA_SUPPLICANT_ERROR, -1) ==
+                                WifiManager.ERROR_AUTHENTICATING
+                            ) {
+                                authErrorSeen.set(true)
+                            }
+                        } catch (_: Exception) {
+                        }
+                    }
+                }
+                @Suppress("UnspecifiedRegisterReceiverFlag")
+                try {
+                    context.registerReceiver(
+                        supplicantReceiver,
+                        IntentFilter(WifiManager.SUPPLICANT_STATE_CHANGED_ACTION)
+                    )
+                } catch (_: Exception) {
+                }
+
+                /** 认证失败统一善后：自动忘记新建配置 + 结果文案 */
+                fun failAuth(): String {
+                    var forgot = false
+                    if (addedNetId >= 0) {
+                        forgot = try {
+                            when (connectChannel) {
+                                1 -> {
+                                    ShizukuUtil.forgetNetwork(addedNetId); true
+                                }
+                                2 -> {
+                                    AidlServiceHelper.forgetNetwork(app, addedNetId); true
+                                }
+                                else -> ApiUtil.forgetNetwork(context, addedNetId)
+                            }
+                        } catch (_: Exception) {
+                            false
+                        }
+                    }
+                    return if (forgot)
+                        context.getString(R.string.mgr_connect_fail_auth_forgot, entry.ssid)
+                    else
+                        context.getString(R.string.mgr_connect_fail_auth, entry.ssid)
+                }
+
+                try {
                 while (true) {
                     if (!ApiUtil.isWifiEnabled(context)) {
                         return context.getString(R.string.mgr_connect_fail_offline)
@@ -1023,23 +1099,31 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
                         idMatch = n >= 0 && entry.networkId >= 0 && n == entry.networkId
                     } catch (_: Exception) {
                     }
+                    // 广播来源的 supplicant 状态（事件驱动更实时，不受定位屏蔽）
+                    val bs = broadcastSupp.get()
 
-                    // 成功：身份匹配 + 4 次握手完成（COMPLETED 为稳态，轮询不会错过）
-                    if ((ssidMatch || idMatch) && supp == SupplicantState.COMPLETED) {
+                    // 成功：身份匹配 + 4 次握手完成（任一状态源报 COMPLETED；
+                    // 密码错误在协议层到不了 COMPLETED，无误报风险）
+                    if ((ssidMatch || idMatch) &&
+                        (supp == SupplicantState.COMPLETED || bs == SupplicantState.COMPLETED)
+                    ) {
                         return context.getString(R.string.mgr_connect_ok, entry.ssid)
                     }
 
-                    // 关联阶段边沿计数（每一轮「非关联→关联」记 1 回合）
+                    // ① 官方认证失败广播（wpa_supplicant 判定密码错误的同源
+                    // 信号，握手失败后约 1 秒即到）→ 立即判负
+                    if (authErrorSeen.get()) return failAuth()
+
+                    // 关联阶段边沿计数（每一轮「非关联→关联」记 1 回合）：
+                    // 应用层身份匹配 + 任一状态源处于关联/握手态
                     val engaged = (ssidMatch || idMatch) &&
-                            supp != null && supp in engagedStates
-                    if (engaged) {
-                        if (!wasEngaged) engagedEpisodes++
-                        engagedEverOnce = true
-                    }
-                    wasEngaged = engaged
+                            ((supp != null && supp in engagedStates) ||
+                                    (bs != null && bs in engagedStates))
+                    var privEngaged = false
 
                     // 特权身份解析（定位关闭时唯一途径，3s 节流）：特权身份
-                    // 对上且（应用层或特权输出的）握手完成 → 成功
+                    // 对上且（应用层/广播/特权输出的）握手完成 → 成功；
+                    // 对上但未完成 = 目标正在被尝试（无定位时唯一的关联证据）
                     if (System.currentTimeMillis() - lastPrivilegedAt > 3000) {
                         lastPrivilegedAt = System.currentTimeMillis()
                         try {
@@ -1048,43 +1132,37 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
                                     (det.netId >= 0 && entry.networkId >= 0 &&
                                             det.netId == entry.networkId)
                             if (privMatch) {
-                                if (supp == SupplicantState.COMPLETED || det.supplicantCompleted) {
+                                if (supp == SupplicantState.COMPLETED ||
+                                    bs == SupplicantState.COMPLETED || det.supplicantCompleted
+                                ) {
                                     return context.getString(R.string.mgr_connect_ok, entry.ssid)
                                 }
-                                engagedEverOnce = true
+                                privEngaged = true
                             }
                         } catch (_: Exception) {
                         }
                     }
+                    val engagedNow = engaged || privEngaged
+                    if (engagedNow) {
+                        if (!wasEngaged) engagedEpisodes++
+                        engagedEverOnce = true
+                    }
+                    wasEngaged = engagedNow
 
-                    // 认证失败信号：目标已关联却断开（密码错误时系统反复重试，
-                    // 信号持续出现；正常连接在信号累积到阈值前已 COMPLETED）
-                    if (engagedEverOnce && !engaged &&
-                        (supp == SupplicantState.DISCONNECTED || supp == SupplicantState.INACTIVE)
-                    ) {
+                    // ② 断开信号兼听（轮询兼听）：目标已关联后任一状态源显示
+                    // 已断开（含 SCANNING 重试循环态）连续 2 次 → 判认证失败
+                    val brokenState = supp == SupplicantState.DISCONNECTED ||
+                            supp == SupplicantState.INACTIVE ||
+                            supp == SupplicantState.SCANNING ||
+                            bs == SupplicantState.DISCONNECTED ||
+                            bs == SupplicantState.INACTIVE ||
+                            bs == SupplicantState.SCANNING
+                    if (engagedEverOnce && !engagedNow && brokenState) {
                         authFailSignals++
                     }
+                    // ③ 关联回合达 3（密码错误时系统反复重试）
                     if (authFailSignals >= 2 || engagedEpisodes >= 3) {
-                        var forgot = false
-                        if (addedNetId >= 0) {
-                            forgot = try {
-                                when (connectChannel) {
-                                    1 -> {
-                                        ShizukuUtil.forgetNetwork(addedNetId); true
-                                    }
-                                    2 -> {
-                                        AidlServiceHelper.forgetNetwork(app, addedNetId); true
-                                    }
-                                    else -> ApiUtil.forgetNetwork(context, addedNetId)
-                                }
-                            } catch (_: Exception) {
-                                false
-                            }
-                        }
-                        return if (forgot)
-                            context.getString(R.string.mgr_connect_fail_auth_forgot, entry.ssid)
-                        else
-                            context.getString(R.string.mgr_connect_fail_auth, entry.ssid)
+                        return failAuth()
                     }
 
                     val elapsed = System.currentTimeMillis() - startAt
@@ -1116,9 +1194,16 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
                         }
                     }
                     if (elapsed >= timeoutMs) {
+                        // 超时兜底：本次为应用新建的配置且始终未连上 → 同样自动
+                        // 忘记（个别 ROM 不产生标准失败信号，但错误配置绝不能
+                        // 残留系统——真机反馈「超时且没有自动忘记」的闭环）
+                        if (addedNetId >= 0) return failAuth()
                         return context.getString(R.string.mgr_connect_fail_timeout)
                     }
                     delay(800)
+                }
+                } finally {
+                    try { context.unregisterReceiver(supplicantReceiver) } catch (_: Exception) {}
                 }
             }
             override fun forgetSaved(entry: SavedNetworkEntry) {
@@ -1146,6 +1231,10 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
                     repeat(6) { attempt ->
                         delay(if (attempt == 0) 500L else 700L)
                         performSavedNow(silent = true)
+                        // 扫描页的「已保存」标记同步刷新（忘掉的卡不再显示已保存）
+                        if (scanNetworksState.isNotEmpty()) {
+                            scanNetworksState = mergeMarks(scanNetworksState)
+                        }
                         val stillThere = savedEntriesState.any {
                             it.ssid == entry.ssid && it.fromSystem
                         }
