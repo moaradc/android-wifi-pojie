@@ -660,17 +660,21 @@ private fun ScanTabPage(controller: ManagerController, app: ToolboxApp) {
         val sec = securitySummary(wifi.capabilities)
         when {
             // 系统已有配置（含密码不可见的 Android 10+ 场景）：networkId 直连
-            cfg != null -> controller.connectSaved(
-                SavedNetworkEntry(
-                    ssid = wifi.ssid,
-                    networkId = cfg.networkId,
-                    password = cfg.preSharedKey?.removeSurrounding("\"").orEmpty()
-                        .ifEmpty { histPwd.orEmpty() },
-                    passwordFromPojie = cfg.preSharedKey.isNullOrEmpty() && histPwd != null,
-                    fromSystem = true,
-                    security = sec
+            cfg != null -> {
+                // 掩码"*"非真实密码（应用 API 通道）：视为不可见，回退破解记录
+                val cfgPwd = cfg.preSharedKey?.removeSurrounding("\"").orEmpty()
+                val effectivePwd = if (isMaskedPsk(cfgPwd)) "" else cfgPwd
+                controller.connectSaved(
+                    SavedNetworkEntry(
+                        ssid = wifi.ssid,
+                        networkId = cfg.networkId,
+                        password = effectivePwd.ifEmpty { histPwd.orEmpty() },
+                        passwordFromPojie = effectivePwd.isEmpty() && histPwd != null,
+                        fromSystem = true,
+                        security = sec
+                    )
                 )
-            )
+            }
 
             // 本应用破解记录留有密码：直接带密码连接
             histPwd != null -> controller.connectSaved(

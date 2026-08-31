@@ -548,6 +548,7 @@
     <string name="result_log_format">%1$s Try: (%2$s, %3$s) Res: %4$s</string>
     <string name="tip_interrupted">Task interrupted (idx=%1$d)</string>
     <string name="tip_success">Success: %1$s</string>
+    <string name="tip_success_saved">Connected via saved config (password not verified)</string>
     <string name="tip_error_view_output">Error, check output</string>
     <string name="tip_all_failed">All failed (n=%1$d)</string>
     <string name="unknown">Unknown</string>
@@ -672,6 +673,7 @@
     <string name="nav_settings">Settings</string>
     <string name="found_saved_password">Saved Config</string>
     <string name="found_saved_password_tip">WiFi config exists. Connect directly?</string>
+    <string name="saved_pwd_masked">Password hidden by system (saved config connects directly)</string>
     <string name="re_run">Rerun</string>
     <string name="direct_try">Try Now</string>
     <string name="app_functions">Functions</string>

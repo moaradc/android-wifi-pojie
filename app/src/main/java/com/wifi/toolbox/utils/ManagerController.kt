@@ -110,6 +110,16 @@ data class NetworkEntry(
 /** WifiInfo.getBSSID() 在定位服务关闭等场景返回的匿名化占位 MAC（非真实 BSSID） */
 const val ANONYMIZED_BSSID = "02:00:00:00:00:00"
 
+/**
+ * Android 10+ 系统对普通应用读取已保存配置时下发的密码掩码
+ * （WifiConfiguration.preSharedKey 被系统置为字面量 "*"，与真实密码无关）。
+ * 真机反馈：应用 API 通道下它被当成真实密码展示/使用——须视为不可见。
+ */
+fun isMaskedPsk(psk: String?): Boolean {
+    if (psk.isNullOrEmpty()) return false
+    return psk.trim('"') == "*"
+}
+
 /** 通道名（UI 展示） */
 fun managerChannelName(channel: Int): String = when (channel) {
     1 -> "Shizuku"
@@ -442,7 +452,9 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
             configs.forEach { cfg ->
                 val ssid = cfg.SSID?.removeSurrounding("\"").orEmpty()
                 if (ssid.isEmpty()) return@forEach
-                val systemPwd = cfg.preSharedKey?.removeSurrounding("\"").orEmpty()
+                // 系统掩码"*"非真实密码（应用 API 通道）：视为不可见，回退破解记录
+                val rawPsk = cfg.preSharedKey?.removeSurrounding("\"").orEmpty()
+                val systemPwd = if (isMaskedPsk(rawPsk)) "" else rawPsk
                 val hist = cracked.find { it.ssid == ssid }
                 val pwd = systemPwd.ifEmpty { hist?.password.orEmpty() }
                 entries.add(

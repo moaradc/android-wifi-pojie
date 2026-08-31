@@ -113,7 +113,12 @@ fun HistoryItem(
                 )
                 item.password?.let { pwd ->
                     TagItem(
-                        text = stringResource(R.string.password_string, pwd),
+                        // 历史遗留的空密码（此前直连成功误记录）显示占位符，
+                        // 不再渲染成空的「密码: 」标签
+                        text = stringResource(
+                            R.string.password_string,
+                            if (pwd.isEmpty()) "-" else pwd
+                        ),
                         type = TagType.Tertiary
                     )
                 }

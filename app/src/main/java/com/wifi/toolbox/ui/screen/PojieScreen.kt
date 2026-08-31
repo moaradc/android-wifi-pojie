@@ -200,12 +200,15 @@ fun PojieScreenContent(
             onDirectTry = {
                 showSavedConfirmDialog = false
                 pendingWifi.savedInfo?.let { saved ->
-                    val psk = saved.preSharedKey.trim('"')
-                    if (psk.length >= 8) {
+                    // 系统掩码"*"非真实密码（应用 API 通道）：视为不可见，
+                    // 走空密码=系统已存配置直连路径
+                    val psk = saved.preSharedKey?.trim('"').orEmpty()
+                    val effective = if (isMaskedPsk(psk)) "" else psk
+                    if (effective.length >= 8) {
                         app?.pojieTask?.start(
                             PojieRunInfo(
                                 ssid = currentTargetSsid,
-                                tryList = listOf(psk),
+                                tryList = listOf(effective),
                                 lastTryTime = System.currentTimeMillis()
                             )
                         )
@@ -288,8 +291,13 @@ fun SavedWifiConfirmDialog(
                             .fillMaxWidth()
                     ) {
                         Text(stringResource(R.string.ssid_string, wifiInfo.ssid), style = MaterialTheme.typography.labelLarge)
+                        // 系统掩码"*"/空密码不是真实密码（应用 API 通道恒不可见）：
+                        // 如实说明并告知可直连，不再渲染成「密码: *」
+                        val psk = saved.preSharedKey?.trim('"').orEmpty()
                         Text(
-                            stringResource(R.string.password_string, saved.preSharedKey.trim('"')),
+                            text = if (psk.isEmpty() || isMaskedPsk(psk))
+                                stringResource(R.string.saved_pwd_masked)
+                            else stringResource(R.string.password_string, psk),
                             style = MaterialTheme.typography.bodySmall
                         )
                     }

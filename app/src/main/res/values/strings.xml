@@ -557,6 +557,7 @@
     <string name="result_log_format">%1$s 尝试: (%2$s, %3$s) 结果: %4$s</string>
     <string name="tip_interrupted">任务中断(index=%1$d)</string>
     <string name="tip_success">连接成功：%1$s</string>
+    <string name="tip_success_saved">连接成功（系统已保存配置直连，密码未验证）</string>
     <string name="tip_error_view_output">执行出错，请查看输出</string>
     <string name="tip_all_failed">全部尝试失败(size=%1$d)</string>
     <string name="unknown">未知</string>
@@ -681,6 +682,7 @@
     <string name="nav_settings">设置</string>
     <string name="found_saved_password">发现已保存密码</string>
     <string name="found_saved_password_tip">系统已存在该 WiFi 的配置信息，是否直接尝试连接？</string>
+    <string name="saved_pwd_masked">密码不可见（系统限制，已保存配置可直接连接）</string>
     <string name="re_run">重新运行</string>
     <string name="direct_try">直接尝试</string>
     <string name="app_functions">应用功能</string>

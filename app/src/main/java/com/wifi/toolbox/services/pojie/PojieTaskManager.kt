@@ -259,6 +259,10 @@ class PojieTaskManager(
         settings: PojieSettings,
         duration: Long
     ) {
+        // 空密码任务=直连系统已存配置（未新建任何网络配置）：无论结果如何，
+        // 任务移除时都不得触发 forgetNetwork——否则直连失败（如路由器
+        // 暂时不可达）会误删用户既有的保存配置
+        if (pass.isEmpty()) handledSsids.add(task.ssid)
         val timeTag = worker.getLogTime()
         var resultStr = service.getString(
             when (result) {
@@ -290,7 +294,10 @@ class PojieTaskManager(
                 service.getString(R.string.tip_interrupted, task.tryIndex)
 
             SinglePojieTask.RESULT_SUCCESS -> app.finishedPojieTasksTip[task.ssid] =
-                service.getString(R.string.tip_success, pass)
+                // 空密码=系统已保存配置直连：如实说明未验证，不再渲染成
+                // 「连接成功：」后面空白（真机反馈）
+                if (pass.isEmpty()) service.getString(R.string.tip_success_saved)
+                else service.getString(R.string.tip_success, pass)
 
             else -> {
                 if (result != SinglePojieTask.RESULT_FAILED && result != SinglePojieTask.RESULT_TIMEOUT && result != SinglePojieTask.RESULT_ERROR_TRANSIENT) {
@@ -312,15 +319,24 @@ class PojieTaskManager(
 
         when (result) {
             SinglePojieTask.RESULT_SUCCESS -> {
-                service.log("${service.getString(R.string.result_success)}: (${task.ssid}, $pass)")
-                app.pojieHistory.addOrUpdateHistory(
-                    PojieHistoryItem(
-                        task.ssid,
-                        task.tryList,
-                        task.tryIndex,
-                        pass
-                    )
+                service.log(
+                    if (pass.isEmpty()) service.getString(R.string.tip_success_saved) + ": (${task.ssid})"
+                    else "${service.getString(R.string.result_success)}: (${task.ssid}, $pass)"
                 )
+                // 空密码直连成功：密码未经验证——绝不用空值覆盖既有破解记录
+                // （真机反馈：直接尝试/沿用进度后被空密码污染，历史「密码:」
+                // 显示为空，连带字典列表被替换成 [""]）；无既有记录也不新建
+                // （直连不产生任何密码信息）
+                if (pass.isNotEmpty()) {
+                    app.pojieHistory.addOrUpdateHistory(
+                        PojieHistoryItem(
+                            task.ssid,
+                            task.tryList,
+                            task.tryIndex,
+                            pass
+                        )
+                    )
+                }
                 handledSsids.add(task.ssid)
                 app.pojieTask.stop(task.ssid)
             }
@@ -361,7 +377,11 @@ class PojieTaskManager(
             else -> app.pojieTask.stop(task.ssid)
         }
 
-        scope.launch(Dispatchers.IO) { updateHistory(app, task.ssid) }
+        // 直连任务（空密码）无进度语义，不刷新历史——避免把字典列表
+        // 替换成 [""] 的同时连带覆盖已成功的密码
+        if (pass.isNotEmpty()) {
+            scope.launch(Dispatchers.IO) { updateHistory(app, task.ssid) }
+        }
     }
 
     private fun processTaskCompletion(app: ToolboxApp, ssid: String) {

@@ -548,6 +548,7 @@
     <string name="result_log_format">%1$s 试: (%2$s, %3$s) 果: %4$s</string>
     <string name="tip_interrupted">操办中断 (第 %1$d 卷)</string>
     <string name="tip_success">盟约已成：%1$s</string>
+    <string name="tip_success_saved">盟约已成（舊檔逕投，密語未驗）</string>
     <string name="tip_error_view_output">操办生乱，请阅其出处</string>
     <string name="tip_all_failed">诸法皆败 (计 %1$d 卷)</string>
     <string name="unknown">未知</string>
@@ -672,6 +673,7 @@
     <string name="nav_settings">陈设</string>
     <string name="found_saved_password">觅得旧日密电</string>
     <string name="found_saved_password_tip">案卷已有此网密传，可欲径直投奔否？</string>
+    <string name="saved_pwd_masked">密語不可窺（天機所蔽，舊盟可逕投）</string>
     <string name="re_run">重头再来</string>
     <string name="direct_try">径直试之</string>
     <string name="app_functions">宝匣功能</string>

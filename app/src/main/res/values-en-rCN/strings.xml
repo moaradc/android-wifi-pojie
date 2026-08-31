@@ -549,6 +549,7 @@
     <string name="result_log_format">%1$s try: (%2$s, %3$s) result: %4$s</string>
     <string name="tip_interrupted">task stop (index=%1$d)</string>
     <string name="tip_success">link OK: %1$s</string>
+    <string name="tip_success_saved">link OK (saved info direct, pass not checked)</string>
     <string name="tip_error_view_output">run error, look out</string>
     <string name="tip_all_failed">all try fail (size=%1$d)</string>
     <string name="unknown">who</string>
@@ -673,6 +674,7 @@
     <string name="nav_settings">set</string>
     <string name="found_saved_password">find saved pass</string>
     <string name="found_saved_password_tip">system have this wifi info, link direct?</string>
+    <string name="saved_pwd_masked">pass hidden (system limit, saved info links direct)</string>
     <string name="re_run">run again</string>
     <string name="direct_try">direct try</string>
     <string name="app_functions">app function</string>
