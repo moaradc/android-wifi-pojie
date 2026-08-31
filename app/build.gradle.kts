@@ -45,6 +45,9 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = true
+            // R8 代码裁剪 + 资源裁剪：移除未引用资源（配合 res/raw/keep.xml
+            // 保留 aboutlibraries 等经 getIdentifier 动态查找的资源）
+            isShrinkResources = true
             manifestPlaceholders["shizukuAuthority"] = "com.wifi.toolbox.shizuku"
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -59,6 +62,23 @@ android {
         buildFeatures {
             buildConfig = true
             aidl = true
+        }
+    }
+
+    packaging {
+        resources {
+            // 小幅瘦身（实测约 1.4MB）：
+            // - tables/**：desugar_jdk_libs 2.x 携带的旧字符集转码表（Big5/GBK/
+            //   EUC-JP/EUC-KR 等，675 文件未压缩 2.88MB）——本应用全部 IO 均
+            //   为 UTF-8（密码字典/JS 脚本/日志/命令输出），不触达旧字符集转换；
+            // - src/**：第三方库误打包的 .java 源文件（运行时永不加载）；
+            // - kotlin_builtins：仅 kotlin-reflect 反射使用，本应用无该依赖
+            excludes += listOf(
+                "tables/**",
+                "src/**",
+                "kotlin/*.kotlin_builtins",
+                "kotlin/**/*.kotlin_builtins"
+            )
         }
     }
 
@@ -133,6 +153,13 @@ dependencies {
     implementation(libs.service)
     implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.nio)
+}
+
+afterEvaluate {
+    // 签名瘦身：minSdk 24 起系统仅校验 v2/v3 签名，v1 签名块（META-INF/
+    // MANIFEST.MF/.SF/.RSA，实测约 280KB）在现有 APK 中本就未被校验——
+    // 属死重，显式关闭不再生成。CI 正式签名（注入属性生成）与本地构建同走此处
+    android.buildTypes.getByName("release").signingConfig?.enableV1Signing = false
 }
 
 fun getAndIncrementBuildNumber(): Int {

@@ -215,6 +215,7 @@
     <string name="mgr_mobile_off">未连接</string>
     <string name="mgr_lbl_carrier">运营商</string>
     <string name="mgr_lbl_roaming">漫游</string>
+    <string name="mgr_qci_need_root">需 Root 后可显示</string>
     <string name="mgr_yes">是</string>
     <string name="mgr_no">否</string>
     <string name="mgr_bssid_hidden">BSSID 已被系统隐藏（开启定位或授权特权通道后可显示）</string>
@@ -229,8 +230,8 @@
     <string name="guard_notif_action_stop">关闭</string>
     <string name="guard_notif_action_exit">结束</string>
     <string name="guard_cat_keepalive">后台保活</string>
-    <string name="guard_keepalive_wakelock">息屏保持检测（唤醒锁）</string>
-    <string name="guard_keepalive_wakelock_tip">保持进程在后台运行。（部分系统可能导致杀后台）</string>
+    <string name="guard_keepalive_wakelock">唤醒锁</string>
+    <string name="guard_keepalive_wakelock_tip">保持进程在后台运行（部分系统可能导致杀后台）</string>
     <string name="guard_keepalive_battery">电池优化白名单</string>
     <string name="guard_keepalive_battery_on">已豁免 ✓（系统弹窗可修改）</string>
     <string name="guard_keepalive_battery_off">未豁免——点击申请（息屏省电会冻结后台）</string>

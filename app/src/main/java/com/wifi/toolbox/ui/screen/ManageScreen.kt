@@ -15,6 +15,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.Spring
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -1061,7 +1062,12 @@ private fun ScanNetworkCard(
 }
 
 @Composable
-private fun DetailRow(label: String, value: String) {
+private fun DetailRow(
+    label: String,
+    value: String,
+    labelColor: Color? = null,
+    valueColor: Color? = null
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1071,13 +1077,14 @@ private fun DetailRow(label: String, value: String) {
         Text(
             text = label,
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = labelColor ?: MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.width(92.dp)
         )
         Text(
             text = value.ifEmpty { "-" },
             style = MaterialTheme.typography.bodySmall,
             fontFamily = FontFamily.Monospace,
+            color = valueColor ?: Color.Unspecified,
             modifier = Modifier.weight(1f)
         )
     }
@@ -1955,7 +1962,8 @@ private fun NetworkCard(
                     )
                 },
                 style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.SemiBold
+                fontWeight = FontWeight.SemiBold,
+                color = heavierOnSurface()
             )
             // 副标题：WiFi=BSSID；移动数据=连接状态
             if (entry.isWifi) {
@@ -1996,45 +2004,45 @@ private fun NetworkCard(
                 Spacer(Modifier.height(10.dp))
 
                 if (entry.isWifi) {
-                    DetailRow(
+                    NetDetailRow(
                         stringResource(R.string.mgr_lbl_rssi),
                         "${entry.rssi} dBm"
                     )
                     if (entry.linkSpeedMbps > 0) {
-                        DetailRow(
+                        NetDetailRow(
                             stringResource(R.string.mgr_lbl_speed),
                             "${entry.linkSpeedMbps} Mbps"
                         )
                     }
                     if (entry.frequencyMhz > 0) {
-                        DetailRow(
+                        NetDetailRow(
                             stringResource(R.string.mgr_lbl_band),
                             "${entry.frequencyMhz} MHz · $band"
                         )
                         if (channel > 0) {
-                            DetailRow(
+                            NetDetailRow(
                                 stringResource(R.string.mgr_lbl_channel),
                                 channel.toString()
                             )
                         }
                     }
-                    DetailRow(stringResource(R.string.mgr_lbl_ip), entry.ipAddress)
-                    DetailRow(stringResource(R.string.mgr_lbl_gateway), entry.gateway)
-                    DetailRow(
+                    NetDetailRow(stringResource(R.string.mgr_lbl_ip), entry.ipAddress)
+                    NetDetailRow(stringResource(R.string.mgr_lbl_gateway), entry.gateway)
+                    NetDetailRow(
                         stringResource(R.string.mgr_lbl_dns),
                         entry.dnsServers.joinToString(", ")
                     )
                     if (entry.dhcpServer.isNotEmpty()) {
-                        DetailRow(stringResource(R.string.mgr_lbl_dhcp), entry.dhcpServer)
+                        NetDetailRow(stringResource(R.string.mgr_lbl_dhcp), entry.dhcpServer)
                     }
                     if (entry.leaseDurationSec > 0) {
-                        DetailRow(
+                        NetDetailRow(
                             stringResource(R.string.mgr_lbl_lease),
                             "${entry.leaseDurationSec}s"
                         )
                     }
                 } else {
-                    DetailRow(
+                    NetDetailRow(
                         stringResource(R.string.mgr_lbl_state),
                         stringResource(
                             if (entry.validated) R.string.mgr_mobile_connected_validated
@@ -2042,16 +2050,48 @@ private fun NetworkCard(
                         )
                     )
                     if (entry.carrier.isNotEmpty()) {
-                        DetailRow(stringResource(R.string.mgr_lbl_carrier), entry.carrier)
+                        NetDetailRow(stringResource(R.string.mgr_lbl_carrier), entry.carrier)
                     }
-                    DetailRow(
+                    NetDetailRow(
                         stringResource(R.string.mgr_lbl_roaming),
                         stringResource(if (entry.roaming) R.string.mgr_yes else R.string.mgr_no)
                     )
+                    // QCI/5QI：Root 专用 AT 通道读取（技术术语无需翻译，同 SSID/BSSID）
+                    // 有值显示网络实际下发的等级；无 Root 提示；其余空值显示 "-"
+                    val qciValue = if (entry.qci.isNotEmpty()) entry.qci
+                    else if (entry.qciNeedRoot) stringResource(R.string.mgr_qci_need_root)
+                    else ""
+                    NetDetailRow("QCI", qciValue)
                 }
             }
         }
     }
+}
+
+/** 文字「加重一丢丢」：亮色主题向纯黑、暗色主题向纯白各拉近一小步——
+ *  * 只提升一档对比度而不改变层级（亮色 onSurface≈#1C1B1F 暗色≈#E6E0E9）
+ *  * 真机反馈：网络卡片名称与实时信息文字偏浅，稍微加重 */
+@Composable
+private fun heavierOnSurface(): Color {
+    val base = MaterialTheme.colorScheme.onSurface
+    return lerp(base, if (isSystemInDarkTheme()) Color.White else Color.Black, 0.15f)
+}
+
+/** 次级实时信息（信号/速率/频段等）基数更浅，同样微调加重（比例稍大） */
+@Composable
+private fun heavierOnSurfaceVariant(): Color {
+    val base = MaterialTheme.colorScheme.onSurfaceVariant
+    return lerp(base, if (isSystemInDarkTheme()) Color.White else Color.Black, 0.24f)
+}
+
+/** 网络卡片分割线下方详情行：标签/数值均比默认加重一丢丢（真机反馈） */
+@Composable
+private fun NetDetailRow(label: String, value: String) {
+    DetailRow(
+        label, value,
+        labelColor = heavierOnSurfaceVariant(),
+        valueColor = heavierOnSurface()
+    )
 }
 
 /** 四段信号仪表条（dBm 分级着色，与主流分析工具一致） */

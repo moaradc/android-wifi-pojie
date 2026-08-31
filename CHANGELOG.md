@@ -1,5 +1,11 @@
 # v3.0.0_Alpha-07
 
+- 新增：移动数据网络卡片新增 QCI 显示（QoS 等级标识，5G SA 下为 5QI——运营商量化你这条数据连接优先级/时延预算的核心参数，QCI 9=尽力而为、6=高优先级数据、5=IMS 信令等），显示的是网络实际下发的值（非终端请求值）。获取方案经联网考证：Android 公开 API 不暴露 QCI（Android 12 的 QosCallback 属系统 API 普通应用不可达），dumpsys 中也无此字段，Cellular-Z/Network Signal Guru 走高通 DIAG（MTK 无此接口）——故采用 Root 下直连基带 AT 通道发 3GPP TS 27.007 标准查询（+CGDCONT?/+CGCONTRDP/+CGEQOSRDP=cid 读网络实际下发 QoS，MediaTek +ESUO 4/5 切换双卡协议栈、会话结束复位；AT 节点自动探测 MTK ttyC*/高通 smd*/三星 ttyACM*/展锐 stty* 并缓存，现代高通无 AT 通道时如实显示 -）。必须 Root 才可显示（无 Root 显示「需 Root 后可显示」提示）；读取经 stdin 喂 su（规避 MagiskSU 吞参数问题）、带看门狗防挂死、成功 30 秒/无 Root 120 秒节流重读、切换数据卡立即重读、双卡按数据网络 PLMN 匹配选栈
+- 优化：包体积从 6.3MB 减至 4.5MB（-29%）——① 排除 desugar_jdk_libs 2.x 携带的旧字符集转码表（tables/ 共 675 文件：Big5/GBK/EUC-JP/EUC-KR 等，本应用全部 IO 均为 UTF-8 永不触达，实测 -1.4MB）；② 开启资源裁剪 isShrinkResources（移除 219 条未引用的 appcompat abc_*/Material3 日期选择器等库字符串，-0.3MB；aboutlibraries 等经 getIdentifier 动态查找的资源以 res/raw/keep.xml 显式保留）；③ 关闭 v1 签名（minSdk 24 起系统仅校验 v2/v3 签名，v1 的 META-INF/MANIFEST.MF/.SF/.RSA 约 280KB 属死重，实测旧 APK 中 v1 本就未被校验）；④ 排除第三方库误打包的 .java 源文件与 kotlin-reflect 元数据 kotlin_builtins（本应用无该依赖）
+- 优化：网络页卡片文字颜色稍微加重一丢丢（真机反馈偏浅）——网络名称（WiFi SSID/移动数据运营商名）与分割线下方的信号强度/链路速率/频段/IP 等实时信息文字（含 QCI 行），亮色主题向纯黑、暗色主题向纯白各拉近一小步（15%/24%），只提一档对比度不改变视觉层级，其他页面详情行不受影响
+- 精简：守护设置「息屏保持检测（唤醒锁）」改为「唤醒锁」，说明「保持进程在后台运行。（部分系统可能导致杀后台）」句号并入括号（5 语言同步）
+- 版本：保持 v3.0.0_Alpha-07 / versionCode 6 不变（按要求）
+
 - 修复：已授予定位权限后切换「应用 API」通道无效果、标签仍显示「来源 Shizuku」，且重开 WiFi 管理器时标签先显「来源 API」又立即翻回「来源 Shizuku」（真机反馈）——根因经官方文档考证：Android 9 起应用层 Wi-Fi API 出数据的硬性条件除定位权限外还包括系统定位开关（官方原文 Location services are enabled on the device (under Settings > Location)），权限≠开关：开关关闭时 getScanResults 应用层读数恒为空列表，而 Shizuku/Root 特权读同一系统扫描缓冲不受此过滤，读取侧的静默降级落在 Shizuku 上，标签如实显示实际数据来源——表现为「切了却像没切」。三处协同修复：① 通道弹窗中系统 API 的可用状态判定补上定位开关检查（此前只查权限，把「定位服务未开启」误报成「可用」），状态分列为 缺定位权限 / 定位服务未开启 / 可用；② 选择系统 API 时权限到手后若定位开关未开，先引导开启——优先 Play services「一键开启」可解析弹窗（checkLocationSettings → ResolvableApiException），无 GMS（国产 ROM 常见）或不可解析时 Toast 提示并跳转系统定位设置页；开启后切换、不开不切换（杜绝切了通道标签来回跳变），弹窗内选择一律实时判定（从系统设置页返回后 remember 缓存不再滞后）；③ channelOrder 可用通道序列同样要求权限+开关双就绪，且指定通道当前不可用时不再置于尝试序列首位（省一次注定为空的读）。读取层多通道回退兜底保持不变（通道真正出不了数时数据仍可达，标签如实标注实际来源）
 - 优化：网络页 BSSID 隐藏提示文案「开启系统定位或授权 Shizuku/Root 后可显示」改为「开启定位或授权特权通道后可显示」——与来源通道切换弹窗的通道术语统一，不再点名具体通道
 - 版本：保持 v3.0.0_Alpha-07 / versionCode 6 不变（按要求）

@@ -71,7 +71,8 @@ jobs:
             if [ -n "$UNSIGNED" ] && [ -x "$APKSIGNER" ]; then
               "$ZIPALIGN" -f 4 "$UNSIGNED" release-aligned.apk
               "$APKSIGNER" sign --ks ~/.android/debug.keystore --ks-pass pass:android \
-                --ks-key-alias androiddebugkey --key-pass pass:android release-aligned.apk
+                --ks-key-alias androiddebugkey --key-pass pass:android \
+                --v1-signing-enabled false release-aligned.apk
               mv -f release-aligned.apk "$UNSIGNED"
               echo "已用 debug 密钥完成回退签名"
             fi

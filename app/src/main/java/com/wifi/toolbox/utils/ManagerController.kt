@@ -20,9 +20,11 @@ import com.wifi.toolbox.R
 import com.wifi.toolbox.ToolboxApp
 import com.wifi.toolbox.structs.PojieSettings
 import com.wifi.toolbox.structs.WifiInfo
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * WiFi 管理器统一数据控制器（扫描 / 已保存网络 / 当前网络详情与诊断）。
@@ -104,7 +106,10 @@ data class NetworkEntry(
     val leaseDurationSec: Int = 0,
     // ---- 移动数据专属 ----
     val carrier: String = "",           // 运营商名（title 为空时兼作标题）
-    val roaming: Boolean = false
+    val roaming: Boolean = false,
+    // ---- 移动数据 QCI（Root AT 通道读取，5G SA 下为 5QI）----
+    val qci: String = "",               // 网络实际下发的 QCI/5QI；空=未读到
+    val qciNeedRoot: Boolean = false    // true=无 Root（UI 显示「需 Root」提示）
 )
 
 /** WifiInfo.getBSSID() 在定位服务关闭等场景返回的匿名化占位 MAC（非真实 BSSID） */
@@ -255,6 +260,16 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
     var networkEntriesState by remember { mutableStateOf<List<NetworkEntry>>(emptyList()) }
     var portalSsidState by remember { mutableStateOf<String?>(null) }
     var portalJob by remember { mutableStateOf<Job?>(null) }
+
+    // ---- 移动数据 QCI（Root AT 通道读取：节流 + 单飞 + 运营商变化立即重读） ----
+    // 下一次允许探测的时间戳；成功 30s / 无 Root 120s / 其他失败 60s。
+    // 刷新循环 3s 一轮，探测本身数秒级且异步，不能每轮都拉起 Root
+    var qciValueState by remember { mutableStateOf("") }
+    var qciNeedRootState by remember { mutableStateOf(false) }
+    var qciNoNodeState by remember { mutableStateOf(false) }
+    var qciJob by remember { mutableStateOf<Job?>(null) }
+    var qciNextProbeAt by remember { mutableLongStateOf(0L) }
+    var qciCarrier by remember { mutableStateOf("") }
 
     // ---- 当前 WiFi 身份会话缓存（networkHandle 变化 = 新连接会话） ----
     var identitySsidState by remember { mutableStateOf("") }
@@ -634,7 +649,9 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
                 validated = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED),
                 portal = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL),
                 carrier = carrier,
-                roaming = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_ROAMING) != true
+                roaming = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_ROAMING) != true,
+                qci = qciValueState,
+                qciNeedRoot = qciNeedRootState
             )
         }
         return entries
@@ -670,6 +687,49 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
                     }
                 }
             } catch (_: Exception) {
+            }
+        }
+    }
+
+    /**
+     * 移动数据 QCI 探测调度：节流（成功 30s / 无 Root 120s / 其他失败 60s）+
+     * 单飞（在途任务不重入）+ 运营商变化（切数据卡）立即重读。
+     * 值更新后由下一轮 3s 刷新带入网络卡片（QciReader.probe 阻塞数秒，
+     * 须在 IO 线程执行；结果回主线程写状态）。
+     */
+    fun maybeFetchQci(mobileConnected: Boolean, carrier: String) {
+        if (!mobileConnected) return
+        if (qciJob?.isActive == true) return
+        if (carrier != qciCarrier) {
+            qciCarrier = carrier
+            qciNextProbeAt = 0L
+        }
+        if (System.currentTimeMillis() < qciNextProbeAt) return
+        val appCtx = context.applicationContext
+        qciJob = scope.launch(Dispatchers.IO) {
+            val dataPlmn = try {
+                (appCtx.getSystemService(Context.TELEPHONY_SERVICE)
+                        as? android.telephony.TelephonyManager)
+                    ?.networkOperator.orEmpty()
+            } catch (_: Exception) { "" }
+            val r = QciReader.probe(appCtx, dataPlmn)
+            withContext(Dispatchers.Main) {
+                if (r.qci.isNotEmpty()) {
+                    qciValueState = r.qci
+                    qciNeedRootState = false
+                    qciNoNodeState = false
+                    qciNextProbeAt = System.currentTimeMillis() + 30_000L
+                } else if (r.noRoot) {
+                    qciValueState = ""
+                    qciNeedRootState = true
+                    // 用户稍后可能点掉 Magisk 弹窗授权，退 120s 重试
+                    qciNextProbeAt = System.currentTimeMillis() + 120_000L
+                } else {
+                    qciNeedRootState = false
+                    qciNoNodeState = r.noNode
+                    // Root 可用但无值（无激活上下文/无 AT 节点）：保留旧值，60s 重试
+                    qciNextProbeAt = System.currentTimeMillis() + 60_000L
+                }
             }
         }
     }
@@ -790,6 +850,9 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
         networkEntriesState = buildNetworkEntries(
             cm, connected, quickSsid, quickNetId, mobileCarrier
         )
+
+        // ---- 移动数据 QCI：Root 专用 AT 通道读取（异步，不影响 3s 刷新节奏） ----
+        maybeFetchQci(mobileCaps != null, mobileCarrier)
     }
 
     /** 实时监听 WiFi 状态变化：广播 + NetworkCallback 双通道，防抖 500ms 后重读。
