@@ -190,6 +190,10 @@ interface ManagerController {
     fun setScanChannel(mode: Int)       // 切换指定通道（经控制器写：settingsState 实例为本控制器持有）
     fun refreshScan()
 
+    /** 离开扫描页时取消在途扫描：扫描是射频级功耗，未停留在扫描页时
+     *  不应继续轮询（切页/退出管理器时由 UI 层 onDispose 调用） */
+    fun stopScan()
+
     // ---- Tab2 已保存 ----
     val savedEntries: List<SavedNetworkEntry>
     val savedLoading: Boolean
@@ -372,11 +376,21 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
                 }
                 if (scanNetworksState.isEmpty()) scanErrorKeyState = 2
                 else scanErrorKeyState = -1
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                // 离开页面主动取消（stopScan）不是错误：不显示「无结果」空态
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 scanErrorKeyState = 2
+            } finally {
+                scanLoadingState = false
             }
-            scanLoadingState = false
         }
+    }
+
+    /** 取消在途扫描（保留已取到的部分结果，再次进入扫描页时重扫） */
+    fun stopScanNow() {
+        scanJob?.cancel()
+        scanJob = null
+        scanLoadingState = false
     }
 
     /**
@@ -870,6 +884,7 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
                 settingsState.value = settingsState.value.copy(scanMode = mode)
             }
             override fun refreshScan() = performScan()
+            override fun stopScan() = stopScanNow()
 
             override val savedEntries get() = savedEntriesState
             override val savedLoading get() = savedLoadingState

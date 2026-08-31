@@ -21,10 +21,21 @@ import com.wifi.toolbox.ui.MainActivity
 @Suppress("DEPRECATION") //targetSdk = 28 不用理会警告
 object ApiUtil {
 
+    /**
+     * 定位权限是否就绪：FINE 或 COARSE 任一即可。
+     *
+     * 官方规则（Android 10 隐私变更）：targetSdk≤28 的应用声明 COARSE 或
+     * FINE 任一即可使用 startScan/getScanResults/getConnectionInfo 等
+     * Wi-Fi API——Android 12+ 用户选「仅近似定位」（只授 COARSE）时本应用
+     * 的系统 API 通道同样可用，不应误判为缺权限。
+     */
     fun hasLocationPermission(context: Context): Boolean {
+        if (ContextCompat.checkSelfPermission(
+                context, Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+        ) return true
         return ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.ACCESS_FINE_LOCATION
+            context, Manifest.permission.ACCESS_COARSE_LOCATION
         ) == PackageManager.PERMISSION_GRANTED
     }
 
@@ -225,7 +236,14 @@ object ApiUtil {
         val activity = activity as? MainActivity ?: return false
         return if (!hasLocationPermission(activity)) {
             activity.pendingPermissionCallback = onGranted
-            activity.permissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+            // FINE+COARSE 双权限同请求：官方文档明确 Android 12+ 单独请求
+            // FINE 会被部分版本系统直接忽略（不弹任何对话框）
+            activity.permissionLauncher.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                )
+            )
             false
         } else {
             true

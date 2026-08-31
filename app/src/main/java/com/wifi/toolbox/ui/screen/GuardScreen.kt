@@ -90,6 +90,12 @@ fun GuardScreen(onMenuClick: () -> Unit) {
     val settings = rememberGuardSettings(context)
     var pageIndex by rememberSaveable { mutableIntStateOf(0) }
 
+    // 折叠/展开状态提升到本层（NavContainer 切页会销毁非当前页组合，
+    // 卡片内部 rememberSaveable 随之丢失——切页回来折叠状态被重置的真机
+    // 反馈根因）；默认折叠（长列表默认展开挤占状态卡/统计瓦片空间）
+    var liveLogExpanded by rememberSaveable { mutableStateOf(false) }
+    var eventsExpanded by rememberSaveable { mutableStateOf(false) }
+
     val pages = remember(settings.value) {
         listOf(
             object : NavPage {
@@ -97,7 +103,7 @@ fun GuardScreen(onMenuClick: () -> Unit) {
                 override val selectedIcon = Icons.Filled.MonitorHeart
                 override val unselectedIcon = Icons.Outlined.MonitorHeart
                 override val content = @Composable {
-                    StatusPage(settings.value, app)
+                    StatusPage(settings.value, app, liveLogExpanded) { liveLogExpanded = it }
                 }
             },
             object : NavPage {
@@ -113,7 +119,7 @@ fun GuardScreen(onMenuClick: () -> Unit) {
                 override val selectedIcon = Icons.Filled.QueryStats
                 override val unselectedIcon = Icons.Outlined.QueryStats
                 override val content = @Composable {
-                    StatsPage(app, settings.value.logDirUri)
+                    StatsPage(app, settings.value.logDirUri, eventsExpanded) { eventsExpanded = it }
                 }
             }
         )
@@ -131,7 +137,12 @@ fun GuardScreen(onMenuClick: () -> Unit) {
 // ==================== 状态页 ====================
 
 @Composable
-private fun StatusPage(settings: GuardSettings, app: ToolboxApp?) {
+private fun StatusPage(
+    settings: GuardSettings,
+    app: ToolboxApp?,
+    liveLogExpanded: Boolean,
+    onLiveLogExpandedChange: (Boolean) -> Unit
+) {
     val context = LocalContext.current
     val running = GuardState.running
     val state = GuardState.currentState
@@ -305,7 +316,11 @@ private fun StatusPage(settings: GuardSettings, app: ToolboxApp?) {
 
         item {
             // ---- 实时日志（复制/清空/保存/导出/管理/多选筛选） ----
-            LiveLogCard(context, settings.logDirUri)
+            // 展开状态由 GuardScreen 层持有（切页不重置，默认折叠）
+            LiveLogCard(
+                context, settings.logDirUri,
+                liveLogExpanded, onLiveLogExpandedChange
+            )
         }
     }
 }
@@ -632,15 +647,19 @@ private fun formatEntry(entry: GuardLogEntry): String =
  * - 筛选多选：全部 / 正常 / 异常 / 自愈（可任意组合，全不选显示空）
  * - 按级别着色展示（最近 50 条）
  * - 保存位置：默认应用私有 log 目录，可在设置页改为 SAF 自选文件夹
+ * - [expanded] 展开状态由 GuardScreen 层持有（切页不重置，默认折叠）
  */
 @Composable
-private fun LiveLogCard(context: Context, logDirUri: String) {
+private fun LiveLogCard(
+    context: Context,
+    logDirUri: String,
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit
+) {
     val logs = GuardState.logList()
     var filterMask by rememberSaveable { mutableIntStateOf(LOG_FILTER_ALL) }
     var showManage by remember { mutableStateOf(false) }
     var toastMsg by remember { mutableStateOf<String?>(null) }
-    // 展开收起（默认展开，收起后仅保留标题与按钮行）
-    var expanded by rememberSaveable { mutableStateOf(true) }
     val chevronRotation by animateFloatAsState(
         targetValue = if (expanded) 180f else 0f,
         animationSpec = tween(250),
@@ -762,7 +781,7 @@ private fun LiveLogCard(context: Context, logDirUri: String) {
                 )
                 // 展开 / 收起（箭头随状态旋转）
                 TipIconButton(
-                    onClick = { expanded = !expanded },
+                    onClick = { onExpandedChange(!expanded) },
                     tip = stringResource(R.string.guard_log_expand_desc),
                     icon = Icons.Outlined.ExpandMore,
                     iconModifier = Modifier.rotate(chevronRotation)
@@ -1967,7 +1986,12 @@ private fun toggleMask(current: Int, bit: Int, on: Boolean): Int =
 // ==================== 统计页 ====================
 
 @Composable
-private fun StatsPage(app: ToolboxApp?, logDirUri: String) {
+private fun StatsPage(
+    app: ToolboxApp?,
+    logDirUri: String,
+    eventsExpanded: Boolean,
+    onEventsExpandedChange: (Boolean) -> Unit
+) {
     val stats = app?.guardStats
     var refreshKey by remember { mutableIntStateOf(0) }
     // 打开统计页时拉一次最新数据 + 自动清理过期事件（服务未运行也能清）
@@ -2039,8 +2063,9 @@ private fun StatsPage(app: ToolboxApp?, logDirUri: String) {
         }
 
         // ---- 事件历史（单卡合并：标题 + 实时日志同款工具行 + 卡内滚动列表） ----
+        // 展开状态由 GuardScreen 层持有（切页不重置，默认折叠）
         item {
-            EventHistoryCard(stats, logDirUri)
+            EventHistoryCard(stats, logDirUri, eventsExpanded, onEventsExpandedChange)
         }
     }
 }
@@ -2182,16 +2207,20 @@ private fun ActionRateCard(stats: GuardStats) {
  *   清零（全部统计+事件，带二次确认）
  * - 保存文件名前缀 guard-events- 与实时日志 guard- 区分
  * - 事件列表卡内滚动显示（全部最近 100 条，时间新→旧）
+ * - [expanded] 展开状态由 GuardScreen 层持有（切页不重置，默认折叠）
  */
 @Composable
-private fun EventHistoryCard(stats: GuardStats, logDirUri: String) {
+private fun EventHistoryCard(
+    stats: GuardStats,
+    logDirUri: String,
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit
+) {
     val context = LocalContext.current
     val events = stats.events
     var showManage by remember { mutableStateOf(false) }
     var showResetConfirm by remember { mutableStateOf(false) }
     var toastMsg by remember { mutableStateOf<String?>(null) }
-    // 展开收起（默认展开，收起后仅保留标题与按钮行）
-    var expanded by rememberSaveable { mutableStateOf(true) }
     val chevronRotation by animateFloatAsState(
         targetValue = if (expanded) 180f else 0f,
         animationSpec = tween(250),
@@ -2317,7 +2346,7 @@ private fun EventHistoryCard(stats: GuardStats, logDirUri: String) {
                 )
                 // 展开 / 收起（箭头随状态旋转）
                 TipIconButton(
-                    onClick = { expanded = !expanded },
+                    onClick = { onExpandedChange(!expanded) },
                     tip = stringResource(R.string.guard_log_expand_desc),
                     icon = Icons.Outlined.ExpandMore,
                     iconModifier = Modifier.rotate(chevronRotation)

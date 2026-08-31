@@ -131,6 +131,9 @@
     <string name="mgr_channel_api_no_location">缺定位权限 · 选择后申请</string>
     <string name="mgr_channel_perm_denied">未获得授权，未切换</string>
     <string name="mgr_channel_switched">已切换来源：%1$s</string>
+    <string name="mgr_channel_loc_settings_title">无法自动申请定位权限</string>
+    <string name="mgr_channel_loc_settings_msg">定位权限已被系统设为「不再询问」，无法自动弹出申请对话框。请前往 应用信息 → 权限 → 位置信息，选择「仅使用期间允许」后返回重试。</string>
+    <string name="mgr_channel_go_settings">去设置</string>
     <string name="mgr_networks_count">共 %1$d 个</string>
     <string name="mgr_refreshing">刷新中…</string>
     <string name="mgr_wifi_off">WiFi 未开启</string>

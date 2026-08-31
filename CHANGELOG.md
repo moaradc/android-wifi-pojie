@@ -1,5 +1,10 @@
 # v3.0.0_Alpha-07
 
+- 优化：扫描页未进入不运行以省功耗——扫描页进入才触发系统扫描（原有行为保留），离开扫描页（切到已保存/网络页或退出管理器）立即取消在途的扫描轮询（此前切页后最长约 3 秒的轮询读取仍继续）；来源通道切换弹窗确认后只刷新当前停留页的数据：在扫描页切换 → 重扫，在已保存页切换 → 仅重读已保存配置（不再触发射频扫描——扫描页进入时会自行重扫，此为第七轮新引入的行为，已按省功耗要求收敛）；主动取消扫描不再误报「无结果」空态
+- 修复：切来源为系统 API 时未弹出定位权限申请（真机反馈）——根因经官方文档考证：Android 12+ 上单独请求 ACCESS_FINE_LOCATION 会被部分版本系统直接忽略（不弹任何对话框，官方原文 If you try to request only ACCESS_FINE_LOCATION, the system ignores the request on some releases of Android 12）。现改为 ACCESS_FINE_LOCATION + ACCESS_COARSE_LOCATION 双权限同请求（RequestMultiplePermissions，通道弹窗与破解页共用链路同步修正）；定位权限就绪判定放宽为 FINE 或 COARSE 任一（Android 10 官方规则：targetSdk≤28 应用声明 COARSE 或 FINE 任一即可使用 startScan/getScanResults/getConnectionInfo 等 Wi-Fi API——用户在 Android 12+ 选「仅近似定位」时系统 API 通道同样可用，不再误判缺权限）；Manifest 补声明 ACCESS_COARSE_LOCATION；权限被系统设为「不再询问」（运行时申请静默秒拒）时弹窗引导前往 应用信息 → 权限 → 位置信息 手动开启
+- 优化：网络守护状态页「实时日志」与统计页「事件历史」改为默认折叠（长列表默认展开挤占状态卡/统计瓦片空间），且折叠/展开状态不再随切换守护页 Tab 自动重置——根因：NavContainer 切页会销毁非当前页的组合，卡片内部 rememberSaveable 状态随页销毁而丢失，切回即重置为默认展开；现状态提升到 GuardScreen 层持有（整个守护页存活期间有效，含配置变更恢复）
+- 版本：保持 v3.0.0_Alpha-07 / versionCode 6 不变（按要求）
+
 - 修复：扫描页未保存、未破解网络输入密码连接成功后不出现「忘记网络」按钮——根因：连接结束后 performSaved() 重读了已保存配置（savedCache 已含系统自动保存的新网络），但扫描列表各条目的 savedInfo 仍是连接前的旧合并结果（null），已连接卡片的忘记按钮以 savedInfo 为数据源故不出现，须手动重扫才恢复。现已保存配置的重读收敛到 performSavedNow 统一处理：savedCache 每次更新即同步重合并扫描页标记（连接结束/忘记轮询/破解历史变化全路径覆盖），连接 finally 改为立即读+600ms/1500ms 两次延迟补读（系统侧配置写入与认证失败自动忘记的删除均异步生效，与忘记网络轮询确认同一策略）
 - 新增：「来源 xxx」标签可点击——弹出数据来源通道切换弹窗（扫描/已保存两页共用）：每通道附实时可用状态（可用/未运行/未授权/未绑定/缺定位权限），选择不可用通道时自动申请对应权限——Shizuku 未授权拉起授权请求、Root AIDL 未绑定则绑定服务（首次绑定触发系统 Root 授权弹窗，轮询最长 10 秒）、系统 API 缺定位权限则发运行时权限申请；权限到手后切换并双页刷新，被拒/失败保持原通道不切换（读取侧本就有多通道静默回退，不会取不到数据）。「自动」选项实时显示当前将选用的通道（Shizuku → Root → 系统 API 首个可用）；无数据时标签显示指定通道名（此前不显示导致切换入口不可达）；切换写入破解设置「执行通道」与设置页同源；AppShizuku.request 增加失败回调供拒绝反馈
 - 版本：应用版本号回退为 v3.0.0_Alpha-07 / versionCode 6（按要求重新发布，覆盖旧 Alpha-07 Release）

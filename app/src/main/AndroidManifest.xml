@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- COARSE 与 FINE 同声明：Android 12+ 单独运行时请求 FINE 会被部分
+         版本系统忽略；且 targetSdk=28 下 COARSE（近似定位）已足以解锁
+         Wi-Fi 扫描/身份 API（Android 10 官方规则） -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />

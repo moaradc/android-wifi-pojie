@@ -1,7 +1,9 @@
 package com.wifi.toolbox.ui.screen
 
 import android.Manifest
+import android.app.Activity
 import android.content.Intent
+import android.net.Uri
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -148,9 +150,17 @@ private fun shizukuBinderAlive(): Boolean = try {
  *
  * 标签文本优先显示实际数据来源（有数据时如实标注）；无数据时显示
  * 当前指定通道（0=自动）——标签常驻显示，切换入口任何时刻可达。
+ *
+ * [refreshScanOnSwitch]：切换通道后只刷新当前停留页（省功耗）——扫描页
+ * 切换→重扫（射频扫描仅在停留扫描页时触发）；已保存页切换→重读配置，
+ * 扫描页进入时会自行重扫。
  */
 @Composable
-private fun SourceChannelTag(source: Int, controller: ManagerController) {
+private fun SourceChannelTag(
+    source: Int,
+    controller: ManagerController,
+    refreshScanOnSwitch: Boolean
+) {
     var showPicker by rememberSaveable { mutableStateOf(false) }
     val label = when {
         source != 0 -> managerChannelName(source)
@@ -165,7 +175,8 @@ private fun SourceChannelTag(source: Int, controller: ManagerController) {
     if (showPicker) {
         SourceChannelPickerDialog(
             controller = controller,
-            onDismiss = { showPicker = false }
+            onDismiss = { showPicker = false },
+            refreshScanOnSwitch = refreshScanOnSwitch
         )
     }
 }
@@ -174,17 +185,21 @@ private fun SourceChannelTag(source: Int, controller: ManagerController) {
  * 数据来源通道切换弹窗。
  *
  * - 每通道附可用状态（可用 / 未运行 / 未授权 / 未绑定 / 缺定位权限）；
- * - 选择可用通道：立即切换（写破解设置 scanMode，两页同源）并刷新；
+ * - 选择可用通道：立即切换（写破解设置 scanMode，两页同源）并刷新
+ *   **当前停留页**（[refreshScanOnSwitch]：未进入的页面不运行其数据加载，
+ *   进入时各自自动加载——扫描是射频级功耗，不应在未停留扫描页时触发）；
  * - 选择不可用通道：先申请对应权限（Shizuku 授权 / Root 绑定授权 /
- *   定位运行时权限），成功后切换；被拒/失败则保持原通道不切换。
- *   即使指定通道不可用，读取也有多通道静默回退兜底（channelOrder），
- *   不会因此取不到数据——弹窗内的权限申请只为让指定通道真正生效。
+ *   定位运行时权限 FINE+COARSE 双权限同请求），成功后切换；被拒/失败
+ *   则保持原通道不切换。即使指定通道不可用，读取也有多通道静默回退
+ *   兜底（channelOrder），不会因此取不到数据——弹窗内的权限申请只为
+ *   让指定通道真正生效。
  * - 「自动」即 0：按 Shizuku → Root → 系统 API 顺序取首个可用。
  */
 @Composable
 private fun SourceChannelPickerDialog(
     controller: ManagerController,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    refreshScanOnSwitch: Boolean
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as ToolboxApp
@@ -210,10 +225,11 @@ private fun SourceChannelPickerDialog(
 
     fun applyAndDismiss(mode: Int) {
         controller.setScanChannel(mode)
-        // 两页数据同源（channelOrder/fetchSavedConfigs 均读 scanMode），
-        // 切换后一并刷新
-        controller.refreshScan()
-        controller.refreshSaved()
+        // 两页数据同源（channelOrder/fetchSavedConfigs 均读 scanMode），但
+        // 只刷新当前停留页：未进入的页面不运行其数据加载（扫描页的加载
+        // 含触发系统射频扫描，已保存页进入时会自行重读）
+        if (refreshScanOnSwitch) controller.refreshScan()
+        else controller.refreshSaved()
         Toast.makeText(
             context,
             context.getString(
@@ -226,15 +242,38 @@ private fun SourceChannelPickerDialog(
         onDismiss()
     }
 
+    // 永久拒绝（系统不再弹权限框）时引导去应用设置的兜底弹窗
+    var showLocationSettings by remember { mutableStateOf(false) }
+
+    // FINE+COARSE 双权限同请求：官方文档明确 Android 12+ 单独请求
+    // ACCESS_FINE_LOCATION 会被部分版本系统直接忽略（不弹任何对话框）
+    // ——真机反馈「切系统API未申请定位权限」的根因；且 targetSdk=28 下
+    // COARSE（近似定位）已足以解锁 Wi-Fi 扫描/身份 API（Android 10 隐私
+    // 变更官方规则：targetSdk≤28 声明 COARSE 或 FINE 任一即可）
     val locationLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { grants ->
         availTick++
-        if (granted) applyAndDismiss(3)
-        else Toast.makeText(
-            context, context.getString(R.string.mgr_channel_perm_denied),
-            Toast.LENGTH_SHORT
-        ).show()
+        val fine = grants[Manifest.permission.ACCESS_FINE_LOCATION] == true
+        val coarse = grants[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        if (fine || coarse) {
+            applyAndDismiss(3)
+        } else {
+            // 区分普通拒绝（可再次弹窗）与永久拒绝（只能去设置手动开）
+            val act = context as? Activity
+            val canAskAgain = act != null && (
+                act.shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_FINE_LOCATION) ||
+                act.shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_COARSE_LOCATION)
+                )
+            if (canAskAgain) {
+                Toast.makeText(
+                    context, context.getString(R.string.mgr_channel_perm_denied),
+                    Toast.LENGTH_SHORT
+                ).show()
+            } else {
+                showLocationSettings = true
+            }
+        }
     }
 
     fun selectChannel(mode: Int) {
@@ -299,7 +338,12 @@ private fun SourceChannelPickerDialog(
             }
 
             3 -> if (apiOk) applyAndDismiss(3)
-            else locationLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+            else locationLauncher.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                )
+            )
         }
     }
 
@@ -366,6 +410,40 @@ private fun SourceChannelPickerDialog(
             }
         }
     )
+
+    // 永久拒绝兜底：定位权限被系统设为「不再询问」时，运行时申请会
+    // 静默秒拒（不弹框）——只能引导用户去应用详情页手动开启
+    if (showLocationSettings) {
+        AlertDialog(
+            onDismissRequest = { showLocationSettings = false },
+            title = { Text(stringResource(R.string.mgr_channel_loc_settings_title)) },
+            text = { Text(stringResource(R.string.mgr_channel_loc_settings_msg)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    try {
+                        context.startActivity(
+                            Intent(
+                                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                Uri.fromParts("package", context.packageName, null)
+                            )
+                        )
+                    } catch (_: Exception) {
+                    }
+                    showLocationSettings = false
+                    // 返回后重新打开弹窗可看到最新可用状态；手动开启后
+                    // 再选系统 API 会直接切换（权限已就绪）
+                    onDismiss()
+                }) {
+                    Text(stringResource(R.string.mgr_channel_go_settings))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showLocationSettings = false }) {
+                    Text(stringResource(R.string.btn_cancel))
+                }
+            }
+        )
+    }
 }
 
 /**
@@ -423,8 +501,12 @@ private fun ScanTabPage(controller: ManagerController, app: ToolboxApp) {
     // 重复连接无意义但忘记是高频需求——如改密码后重连）
     var confirmForget by rememberSaveable { mutableStateOf<String?>(null) }
 
-    // 进入页面自动扫一轮
-    LaunchedEffect(Unit) { controller.refreshScan() }
+    // 进入页面自动扫一轮；离开（切页/退出管理器）立即取消在途扫描
+    // ——扫描是射频级功耗，未停留在扫描页时不应继续轮询（真机反馈：省功耗）
+    DisposableEffect(Unit) {
+        controller.refreshScan()
+        onDispose { controller.stopScan() }
+    }
 
     // 操作结果轻提示
     LaunchedEffect(controller.opMessage) {
@@ -598,7 +680,11 @@ private fun ScanTabPage(controller: ManagerController, app: ToolboxApp) {
             )
             Spacer(Modifier.width(8.dp))
             // 来源标签（可点击）：弹出通道切换对话框（可用状态 + 不可用时申请权限）
-            SourceChannelTag(source = controller.scanSource, controller = controller)
+            SourceChannelTag(
+                source = controller.scanSource,
+                controller = controller,
+                refreshScanOnSwitch = true
+            )
             Spacer(Modifier.weight(1f))
             if (controller.scanLoading) {
                 CircularProgressIndicator(
@@ -1132,8 +1218,13 @@ private fun SavedTabPage(controller: ManagerController) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(Modifier.width(8.dp))
-            // 来源标签（可点击）：与扫描页同一通道切换弹窗
-            SourceChannelTag(source = controller.savedSource, controller = controller)
+            // 来源标签（可点击）：与扫描页同一通道切换弹窗（本页切换只重读
+            // 配置，不触发射频扫描——扫描页进入时自会重扫）
+            SourceChannelTag(
+                source = controller.savedSource,
+                controller = controller,
+                refreshScanOnSwitch = false
+            )
             Spacer(Modifier.weight(1f))
             if (controller.savedLoading) {
                 CircularProgressIndicator(

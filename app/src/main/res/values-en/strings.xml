@@ -129,6 +129,9 @@
     <string name="mgr_channel_api_no_location">No location permission · requested on select</string>
     <string name="mgr_channel_perm_denied">Permission denied, channel unchanged</string>
     <string name="mgr_channel_switched">Source switched: %1$s</string>
+    <string name="mgr_channel_loc_settings_title">Cannot request location permission</string>
+    <string name="mgr_channel_loc_settings_msg">Location permission is permanently denied, so the system can no longer show the request dialog automatically. Go to App info, then Permissions, then Location, allow it while using the app, and come back to retry.</string>
+    <string name="mgr_channel_go_settings">Open settings</string>
     <string name="mgr_networks_count">%1$d total</string>
     <string name="mgr_refreshing">Refreshing…</string>
     <string name="mgr_wifi_off">WiFi is off</string>

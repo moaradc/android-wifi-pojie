@@ -193,9 +193,12 @@ class MainActivity : AppCompatActivity() {
 
     var pendingPermissionCallback: (() -> Unit)? = null
 
+    // FINE+COARSE 双权限同请求（Android 12+ 单独请求 FINE 会被部分版本
+    // 系统忽略不弹框；targetSdk=28 下 COARSE 已足以解锁 Wi-Fi API）；
+    // 任一授即可视为成功（用户选「仅近似定位」时只授 COARSE）
     val permissionLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
-            if (isGranted) {
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
+            if (grants.values.any { it }) {
                 pendingPermissionCallback?.invoke()
                 pendingPermissionCallback = null
             }

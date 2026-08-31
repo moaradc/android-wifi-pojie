@@ -129,6 +129,9 @@
     <string name="mgr_channel_api_no_location">缺定位之權 · 擇之則請</string>
     <string name="mgr_channel_perm_denied">未得其許，道不易</string>
     <string name="mgr_channel_switched">已易其源：%1$s</string>
+    <string name="mgr_channel_loc_settings_title">定位之權未能自請</string>
+    <string name="mgr_channel_loc_settings_msg">定位之權已為系統所拒，不復自動彈窗以請。請往 應用資訊 → 權限 → 位置，擇「僅用之時允之」，後歸而再試。</string>
+    <string name="mgr_channel_go_settings">往設定</string>
     <string name="mgr_networks_count">凡 %1$d 個</string>
     <string name="mgr_refreshing">巡索中…</string>
     <string name="mgr_wifi_off">無線未啟</string>
