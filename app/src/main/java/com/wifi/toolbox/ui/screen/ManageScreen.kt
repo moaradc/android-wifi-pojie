@@ -1,14 +1,18 @@
 package com.wifi.toolbox.ui.screen
 
+import android.Manifest
 import android.content.Intent
 import android.provider.Settings
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.Spring
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
@@ -127,6 +131,281 @@ fun ManageScreen(onMenuClick: () -> Unit) {
             subtitle = stringResource(R.string.wifi_manager),
             onMenuClick = onMenuClick
         )
+    }
+}
+
+// ==================== 来源通道标签与切换弹窗（扫描/已保存两页共用） ====================
+
+/** Shizuku binder 是否存活（未装/未启动为 false；申请授权前需先存活） */
+private fun shizukuBinderAlive(): Boolean = try {
+    rikka.shizuku.Shizuku.pingBinder()
+} catch (_: Exception) {
+    false
+}
+
+/**
+ * 「来源」标签（可点击）——点击弹出数据来源通道切换弹窗。
+ *
+ * 标签文本优先显示实际数据来源（有数据时如实标注）；无数据时显示
+ * 当前指定通道（0=自动）——标签常驻显示，切换入口任何时刻可达。
+ */
+@Composable
+private fun SourceChannelTag(source: Int, controller: ManagerController) {
+    var showPicker by rememberSaveable { mutableStateOf(false) }
+    val label = when {
+        source != 0 -> managerChannelName(source)
+        controller.scanChannel != 0 -> managerChannelName(controller.scanChannel)
+        else -> stringResource(R.string.mgr_channel_auto)
+    }
+    TagItem(
+        text = stringResource(R.string.mgr_scan_source) + " " + label,
+        type = TagType.Tertiary,
+        modifier = Modifier.clickable { showPicker = true }
+    )
+    if (showPicker) {
+        SourceChannelPickerDialog(
+            controller = controller,
+            onDismiss = { showPicker = false }
+        )
+    }
+}
+
+/**
+ * 数据来源通道切换弹窗。
+ *
+ * - 每通道附可用状态（可用 / 未运行 / 未授权 / 未绑定 / 缺定位权限）；
+ * - 选择可用通道：立即切换（写破解设置 scanMode，两页同源）并刷新；
+ * - 选择不可用通道：先申请对应权限（Shizuku 授权 / Root 绑定授权 /
+ *   定位运行时权限），成功后切换；被拒/失败则保持原通道不切换。
+ *   即使指定通道不可用，读取也有多通道静默回退兜底（channelOrder），
+ *   不会因此取不到数据——弹窗内的权限申请只为让指定通道真正生效。
+ * - 「自动」即 0：按 Shizuku → Root → 系统 API 顺序取首个可用。
+ */
+@Composable
+private fun SourceChannelPickerDialog(
+    controller: ManagerController,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val app = context.applicationContext as ToolboxApp
+    val scope = rememberCoroutineScope()
+    // Root 绑定等待中（绑定期间禁用全部选项防并发触发）
+    var bindingRoot by remember { mutableStateOf(false) }
+    // 权限申请等异步事件后的可用状态重算信号（Shizuku/定位授权非 Compose
+    // 状态，需手动触发重组刷新状态文本）
+    var availTick by remember { mutableIntStateOf(0) }
+
+    val shizukuAlive = remember(availTick) { shizukuBinderAlive() }
+    val shizukuGranted = remember(availTick) { WifiHealer.isShizukuAvailable() }
+    val rootBound = app.aidl.ipc != null      // Compose 状态：绑定完成自动重组
+    val apiOk = remember(availTick) { ApiUtil.hasLocationPermission(context) }
+    val current = controller.scanChannel
+
+    // 「自动」当前实际会选用的通道（与 channelOrder 的自动顺序一致）
+    val autoPick = when {
+        shizukuGranted -> managerChannelName(1)
+        rootBound -> managerChannelName(2)
+        else -> managerChannelName(3)
+    }
+
+    fun applyAndDismiss(mode: Int) {
+        controller.setScanChannel(mode)
+        // 两页数据同源（channelOrder/fetchSavedConfigs 均读 scanMode），
+        // 切换后一并刷新
+        controller.refreshScan()
+        controller.refreshSaved()
+        Toast.makeText(
+            context,
+            context.getString(
+                R.string.mgr_channel_switched,
+                if (mode == 0) context.getString(R.string.mgr_channel_auto)
+                else managerChannelName(mode)
+            ),
+            Toast.LENGTH_SHORT
+        ).show()
+        onDismiss()
+    }
+
+    val locationLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        availTick++
+        if (granted) applyAndDismiss(3)
+        else Toast.makeText(
+            context, context.getString(R.string.mgr_channel_perm_denied),
+            Toast.LENGTH_SHORT
+        ).show()
+    }
+
+    fun selectChannel(mode: Int) {
+        when (mode) {
+            0 -> applyAndDismiss(0)
+
+            1 -> when {
+                // 已授权：直接切换
+                shizukuGranted -> applyAndDismiss(1)
+                // binder 不在线：无法拉起授权（Shizuku 未装/未启动），
+                // 不切换——静默回退虽能兜底，但指定通道应真实生效
+                !shizukuAlive -> Toast.makeText(
+                    context, context.getString(R.string.mgr_channel_shizuku_offline),
+                    Toast.LENGTH_SHORT
+                ).show()
+                // 已运行未授权：立即申请 Shizuku 授权
+                else -> app.shizuku.request(
+                    { availTick++; applyAndDismiss(1) },
+                    {
+                        availTick++
+                        Toast.makeText(
+                            context, context.getString(R.string.mgr_channel_perm_denied),
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                )
+            }
+
+            2 -> when {
+                rootBound -> applyAndDismiss(2)
+                else -> {
+                    // 绑定 Root AIDL 服务——libsu RootService 首次绑定会触发
+                    // 系统/超级用户应用的 Root 授权弹窗；绑定是异步的，
+                    // 轮询等待（最长 10 秒，授权弹窗需用户操作）
+                    bindingRoot = true
+                    app.aidl.startAIDLServiceRoot()
+                    scope.launch {
+                        try {
+                            var ok = false
+                            var waited = 0
+                            while (waited < 10000) {
+                                delay(500)
+                                waited += 500
+                                if (app.aidl.ipc != null) {
+                                    ok = true
+                                    break
+                                }
+                            }
+                            bindingRoot = false
+                            availTick++
+                            if (ok) applyAndDismiss(2)
+                            else Toast.makeText(
+                                context,
+                                context.getString(R.string.mgr_channel_root_bind_fail),
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        } catch (_: Exception) {
+                            bindingRoot = false
+                        }
+                    }
+                }
+            }
+
+            3 -> if (apiOk) applyAndDismiss(3)
+            else locationLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = { if (!bindingRoot) onDismiss() },
+        title = { Text(stringResource(R.string.mgr_channel_dialog_title)) },
+        text = {
+            Column {
+                // 自动
+                ChannelRow(
+                    name = stringResource(R.string.mgr_channel_auto),
+                    status = stringResource(R.string.mgr_channel_auto_using, autoPick),
+                    statusInfo = true,
+                    selected = current == 0,
+                    enabled = !bindingRoot,
+                    onClick = { selectChannel(0) }
+                )
+                // Shizuku
+                ChannelRow(
+                    name = stringResource(R.string.shizuku_iwifimanager),
+                    status = when {
+                        shizukuGranted -> stringResource(R.string.mgr_channel_status_ok)
+                        shizukuAlive -> stringResource(R.string.mgr_channel_shizuku_unauthorized)
+                        else -> stringResource(R.string.mgr_channel_shizuku_offline)
+                    },
+                    statusInfo = shizukuGranted,
+                    selected = current == 1,
+                    enabled = !bindingRoot,
+                    onClick = { selectChannel(1) }
+                )
+                // Root AIDL
+                ChannelRow(
+                    name = stringResource(R.string.aidl_iwifimanager),
+                    status = when {
+                        rootBound -> stringResource(R.string.mgr_channel_status_ok)
+                        bindingRoot -> stringResource(R.string.mgr_channel_root_binding)
+                        else -> stringResource(R.string.mgr_channel_root_unbound)
+                    },
+                    statusInfo = rootBound,
+                    selected = current == 2,
+                    enabled = !bindingRoot,
+                    showProgress = bindingRoot,
+                    onClick = { selectChannel(2) }
+                )
+                // 系统 API
+                ChannelRow(
+                    name = stringResource(R.string.api_wifimanager),
+                    status = if (apiOk) stringResource(R.string.mgr_channel_status_ok)
+                    else stringResource(R.string.mgr_channel_api_no_location),
+                    statusInfo = apiOk,
+                    selected = current == 3,
+                    enabled = !bindingRoot,
+                    onClick = { selectChannel(3) }
+                )
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(
+                onClick = { if (!bindingRoot) onDismiss() },
+                enabled = !bindingRoot
+            ) {
+                Text(stringResource(R.string.btn_cancel))
+            }
+        }
+    )
+}
+
+/**
+ * 通道选项行：单选圆点 + 名称 + 可用状态（不可用为错误色），
+ * 绑定等待中右侧显示进度指示。
+ */
+@Composable
+private fun ChannelRow(
+    name: String,
+    status: String,
+    statusInfo: Boolean,
+    selected: Boolean,
+    enabled: Boolean,
+    showProgress: Boolean = false,
+    onClick: () -> Unit
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = enabled) { onClick() }
+            .padding(vertical = 6.dp)
+    ) {
+        RadioButton(selected = selected, onClick = null, enabled = enabled)
+        Spacer(Modifier.width(4.dp))
+        Column(Modifier.weight(1f)) {
+            Text(name, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                text = status,
+                style = MaterialTheme.typography.labelMedium,
+                color = if (statusInfo) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.error
+            )
+        }
+        if (showProgress) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(16.dp),
+                strokeWidth = 2.dp
+            )
+        }
     }
 }
 
@@ -317,14 +596,9 @@ private fun ScanTabPage(controller: ManagerController, app: ToolboxApp) {
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            if (controller.scanSource != 0) {
-                Spacer(Modifier.width(8.dp))
-                TagItem(
-                    text = stringResource(R.string.mgr_scan_source) + " " +
-                            managerChannelName(controller.scanSource),
-                    type = TagType.Tertiary
-                )
-            }
+            Spacer(Modifier.width(8.dp))
+            // 来源标签（可点击）：弹出通道切换对话框（可用状态 + 不可用时申请权限）
+            SourceChannelTag(source = controller.scanSource, controller = controller)
             Spacer(Modifier.weight(1f))
             if (controller.scanLoading) {
                 CircularProgressIndicator(
@@ -857,14 +1131,9 @@ private fun SavedTabPage(controller: ManagerController) {
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            if (controller.savedSource != 0) {
-                Spacer(Modifier.width(8.dp))
-                TagItem(
-                    text = stringResource(R.string.mgr_scan_source) + " " +
-                            managerChannelName(controller.savedSource),
-                    type = TagType.Tertiary
-                )
-            }
+            Spacer(Modifier.width(8.dp))
+            // 来源标签（可点击）：与扫描页同一通道切换弹窗
+            SourceChannelTag(source = controller.savedSource, controller = controller)
             Spacer(Modifier.weight(1f))
             if (controller.savedLoading) {
                 CircularProgressIndicator(

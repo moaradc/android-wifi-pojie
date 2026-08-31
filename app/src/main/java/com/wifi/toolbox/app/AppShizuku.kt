@@ -53,17 +53,21 @@ class AppShizuku(private val scope: CoroutineScope) {
     /**
      * 申请权限
      * @param call 成功后的回调
+     * @param onFail 用户拒绝授权时的回调（可空：历史调用点无失败提示需求）
      * @return none
      */
-    fun request(call: () -> Unit) {
+    fun request(call: () -> Unit, onFail: (() -> Unit)? = null) {
         Shizuku.requestPermission(REQUEST_PERMISSION_CODE)
         scope.launch {
             try {
                 val ok = msgFlow.first()
                 if (ok) {
                     call()
+                } else {
+                    onFail?.invoke()
                 }
             } catch (_: Throwable) {
+                onFail?.invoke()
             }
         }
     }

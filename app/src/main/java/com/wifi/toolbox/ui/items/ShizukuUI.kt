@@ -17,10 +17,11 @@ fun checkShizukuUI(
         } else if (Shizuku.shouldShowRequestPermissionRationale()) {
             app.alert(app.getString(R.string.shizuku), app.getString(R.string.permission_always_refuse))
         } else {
-            app.shizuku.request{
+            // 命名参数：request(call, onFail) 追尾 lambda 会绑定到末参 onFail
+            app.shizuku.request(call = {
                 onGranted()
                 onSuccess()
-            }
+            })
         }
     } catch (_: IllegalStateException) {
         try {

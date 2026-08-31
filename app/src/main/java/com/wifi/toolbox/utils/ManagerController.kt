@@ -186,6 +186,8 @@ interface ManagerController {
     val scanLoading: Boolean
     val scanSource: Int                 // 实际数据来源通道（0=无数据）
     val scanErrorKey: Int               // 空态原因码：-1=有数据 0=未扫描 1=WiFi关 2=无结果
+    val scanChannel: Int                // 指定数据来源通道（0=自动，与破解设置同源 scanMode）
+    fun setScanChannel(mode: Int)       // 切换指定通道（经控制器写：settingsState 实例为本控制器持有）
     fun refreshScan()
 
     // ---- Tab2 已保存 ----
@@ -390,6 +392,16 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
             val (configs, src) = fetchSavedConfigs()
             savedSourceState = src
             savedCache = configs
+            // 扫描页「已保存」标记与已连接卡「忘记网络」按钮的数据源
+            // （savedInfo）随 savedCache 同步重合并——savedCache 的更新全部
+            // 汇聚在本函数（连接结束/忘记轮询/破解历史变化），此前仅在
+            // performScan 与忘记轮询两处显式合并：密码连接成功后系统已保存
+            // 新网络，但扫描页各条目的 savedInfo 仍是连接前的旧合并结果
+            // （null）→ 已连接卡片既无「已保存」标签也无「忘记网络」按钮
+            // （真机反馈），须手动重扫才出现
+            if (scanNetworksState.isNotEmpty()) {
+                scanNetworksState = mergeMarks(scanNetworksState)
+            }
 
             // 破解成功记录（本地库，无任何权限要求）。
             // 直读 StateFlow.value：compose 状态首帧可能尚未传播首次发射，
@@ -848,6 +860,15 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
             override val scanLoading get() = scanLoadingState
             override val scanSource get() = scanSourceState
             override val scanErrorKey get() = scanErrorKeyState
+            override val scanChannel get() = settingsState.value.scanMode
+            override fun setScanChannel(mode: Int) {
+                // 经 rememberPojieSettings 的 setter：同步内存态并持久化；
+                // channelOrder() 读取同一 state，下一次读取立即生效。
+                // 外部另建 rememberPojieSettings 写 prefs 不会同步本控制器的
+                // 内存态（各自独立的 remember 实例），故必须由控制器自己写
+                if (settingsState.value.scanMode == mode) return
+                settingsState.value = settingsState.value.copy(scanMode = mode)
+            }
             override fun refreshScan() = performScan()
 
             override val savedEntries get() = savedEntriesState
@@ -970,13 +991,19 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
                         connectingSsidState = null
                         if (finalMsg != null) opMessageState = finalMsg
                         readCurrent()
-                        performSaved()
-                        // 连接成功（目标已成当前网络）→ 异步检测认证网络，
-                        // 命中 NET_CAPABILITY_CAPTIVE_PORTAL 时弹窗说明并引导
-                        // 跳系统 WiFi 设置完成网页认证
+                        // 已保存配置立即重读（扫描页标记随 savedCache 在
+                        // performSavedNow 内同步合并）；系统侧配置写入/删除
+                        // 异步生效——连接成功保存新配置、认证失败自动忘记
+                        // 删除新建配置都可能有短暂延迟，延迟补读确认最终状态
+                        // （与忘记网络的轮询确认同一策略，silent 不闪 loading）
+                        performSavedNow(silent = true)
                         if (isCurrentNetwork(entry.ssid, entry.networkId)) {
                             startPortalCheck(entry.ssid)
                         }
+                        delay(600)
+                        performSavedNow(silent = true)
+                        delay(900)
+                        performSavedNow(silent = true)
                     }
                 }
             }
@@ -1249,11 +1276,9 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
                     // silent 轮询不闪 loading。最长约 4.2s。
                     repeat(6) { attempt ->
                         delay(if (attempt == 0) 500L else 700L)
+                        // 扫描页「已保存」标记的同步合并已收敛在 performSavedNow
+                        // 内（savedCache 更新即重合并，含本轮询路径）
                         performSavedNow(silent = true)
-                        // 扫描页的「已保存」标记同步刷新（忘掉的卡不再显示已保存）
-                        if (scanNetworksState.isNotEmpty()) {
-                            scanNetworksState = mergeMarks(scanNetworksState)
-                        }
                         val stillThere = savedEntriesState.any {
                             it.ssid == entry.ssid && it.fromSystem
                         }
