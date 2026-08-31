@@ -213,7 +213,6 @@
     <string name="mgr_mobile_off">Not connected</string>
     <string name="mgr_lbl_carrier">Carrier</string>
     <string name="mgr_lbl_roaming">Roaming</string>
-    <string name="mgr_qci_need_root">Needs root to display</string>
     <string name="mgr_yes">Yes</string>
     <string name="mgr_no">No</string>
     <string name="mgr_bssid_hidden">BSSID hidden by system (enable location or authorize a privileged channel to reveal)</string>

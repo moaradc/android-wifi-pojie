@@ -215,7 +215,6 @@
     <string name="mgr_mobile_off">未连接</string>
     <string name="mgr_lbl_carrier">运营商</string>
     <string name="mgr_lbl_roaming">漫游</string>
-    <string name="mgr_qci_need_root">需 Root 后可显示</string>
     <string name="mgr_yes">是</string>
     <string name="mgr_no">否</string>
     <string name="mgr_bssid_hidden">BSSID 已被系统隐藏（开启定位或授权特权通道后可显示）</string>

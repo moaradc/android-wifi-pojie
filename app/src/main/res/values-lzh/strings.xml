@@ -213,7 +213,6 @@
     <string name="mgr_mobile_off">未通</string>
     <string name="mgr_lbl_carrier">行網之商</string>
     <string name="mgr_lbl_roaming">漫游</string>
-    <string name="mgr_qci_need_root">需 Root 後可顯示</string>
     <string name="mgr_yes">然</string>
     <string name="mgr_no">否</string>
     <string name="mgr_bssid_hidden">BSSID 為系統所隱（啟定位或授特權之途方可示之）</string>

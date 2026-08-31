@@ -1,5 +1,8 @@
 # v3.0.0_Alpha-07
 
+- 移除：移动数据网络卡片「QCI」行及 Root AT 通道读取能力整体下线（上一轮新增，按要求撤下）——QciReader 模块（基带 AT 节点探测 + 3GPP TS 27.007 查询 + MTK +ESUO 双卡切栈）、ManagerController 节流调度与 qci/qciNeedRoot 字段、网络页移动数据卡 QCI 显示行、mgr_qci_need_root 字符串 ×5 语言全部移除，连带清理失效的 Dispatchers/withContext 导入；移除后移动数据卡片保留 状态/运营商/漫游 行，WiFi 卡片与 3 秒自动刷新不受影响（源码与资源 grep 校验 0 残留，编译通过）
+- 版本：保持 v3.0.0_Alpha-07 / versionCode 6 不变（按要求）
+
 - 新增：移动数据网络卡片新增 QCI 显示（QoS 等级标识，5G SA 下为 5QI——运营商量化你这条数据连接优先级/时延预算的核心参数，QCI 9=尽力而为、6=高优先级数据、5=IMS 信令等），显示的是网络实际下发的值（非终端请求值）。获取方案经联网考证：Android 公开 API 不暴露 QCI（Android 12 的 QosCallback 属系统 API 普通应用不可达），dumpsys 中也无此字段，Cellular-Z/Network Signal Guru 走高通 DIAG（MTK 无此接口）——故采用 Root 下直连基带 AT 通道发 3GPP TS 27.007 标准查询（+CGDCONT?/+CGCONTRDP/+CGEQOSRDP=cid 读网络实际下发 QoS，MediaTek +ESUO 4/5 切换双卡协议栈、会话结束复位；AT 节点自动探测 MTK ttyC*/高通 smd*/三星 ttyACM*/展锐 stty* 并缓存，现代高通无 AT 通道时如实显示 -）。必须 Root 才可显示（无 Root 显示「需 Root 后可显示」提示）；读取经 stdin 喂 su（规避 MagiskSU 吞参数问题）、带看门狗防挂死、成功 30 秒/无 Root 120 秒节流重读、切换数据卡立即重读、双卡按数据网络 PLMN 匹配选栈
 - 优化：包体积从 6.3MB 减至 4.5MB（-29%）——① 排除 desugar_jdk_libs 2.x 携带的旧字符集转码表（tables/ 共 675 文件：Big5/GBK/EUC-JP/EUC-KR 等，本应用全部 IO 均为 UTF-8 永不触达，实测 -1.4MB）；② 开启资源裁剪 isShrinkResources（移除 219 条未引用的 appcompat abc_*/Material3 日期选择器等库字符串，-0.3MB；aboutlibraries 等经 getIdentifier 动态查找的资源以 res/raw/keep.xml 显式保留）；③ 关闭 v1 签名（minSdk 24 起系统仅校验 v2/v3 签名，v1 的 META-INF/MANIFEST.MF/.SF/.RSA 约 280KB 属死重，实测旧 APK 中 v1 本就未被校验）；④ 排除第三方库误打包的 .java 源文件与 kotlin-reflect 元数据 kotlin_builtins（本应用无该依赖）
 - 优化：网络页卡片文字颜色稍微加重一丢丢（真机反馈偏浅）——网络名称（WiFi SSID/移动数据运营商名）与分割线下方的信号强度/链路速率/频段/IP 等实时信息文字（含 QCI 行），亮色主题向纯黑、暗色主题向纯白各拉近一小步（15%/24%），只提一档对比度不改变视觉层级，其他页面详情行不受影响

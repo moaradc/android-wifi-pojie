@@ -2056,12 +2056,6 @@ private fun NetworkCard(
                         stringResource(R.string.mgr_lbl_roaming),
                         stringResource(if (entry.roaming) R.string.mgr_yes else R.string.mgr_no)
                     )
-                    // QCI/5QI：Root 专用 AT 通道读取（技术术语无需翻译，同 SSID/BSSID）
-                    // 有值显示网络实际下发的等级；无 Root 提示；其余空值显示 "-"
-                    val qciValue = if (entry.qci.isNotEmpty()) entry.qci
-                    else if (entry.qciNeedRoot) stringResource(R.string.mgr_qci_need_root)
-                    else ""
-                    NetDetailRow("QCI", qciValue)
                 }
             }
         }
