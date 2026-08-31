@@ -230,7 +230,8 @@
     <string name="guard_keepalive_wakelock">喚醒鎖</string>
     <string name="guard_keepalive_wakelock_tip">保持進程在後台運行（部分系統可能導致殺後台）</string>
     <string name="guard_keepalive_heartbeat">心跳鬧鐘看門狗</string>
-    <string name="guard_keepalive_heartbeat_tip">深度休眠中喚醒鎖會被系統忽略，鬧鐘仍週期喚醒補偵測；程序被殺後自動拉起（免特權，預設開）</string>
+    <string name="guard_keepalive_heartbeat_tip">兜底保險（免特權）：偵測停擺時補偵，程序被殺後自動拉起</string>
+    <string name="guard_heartbeat_banner">心跳鬧鐘是兜底保險，不是偵測主力：主循環停擺才補偵，平時不重複偵測。深度休眠中系統限流約 9 分鐘一響，更短被靜默延後（不排隊）；短間隔買的是息屏初期與被殺後的復活速度。後台不偵測時可開啟</string>
     <string name="guard_keepalive_heartbeat_interval">心跳間隔</string>
     <string name="guard_heartbeat_interval_tip">深度休眠（Doze）下系統限流約 9 分鐘一次，更短會被靜默延後（不報錯）</string>
     <string name="guard_heartbeat_auto">自動（跟隨偵測間隔，最低 60 秒）</string>

@@ -232,7 +232,8 @@
     <string name="guard_keepalive_wakelock">唤醒锁</string>
     <string name="guard_keepalive_wakelock_tip">保持进程在后台运行（部分系统可能导致杀后台）</string>
     <string name="guard_keepalive_heartbeat">心跳闹钟看门狗</string>
-    <string name="guard_keepalive_heartbeat_tip">深度休眠中唤醒锁会被系统忽略，闹钟仍周期唤醒补检测；进程被杀后自动拉起（免特权，默认开）</string>
+    <string name="guard_keepalive_heartbeat_tip">兜底保险（免特权）：检测停摆时补检，进程被杀后自动拉起</string>
+    <string name="guard_heartbeat_banner">心跳闹钟是兜底保险，不是检测主力：主循环停摆才补检，平时不重复检测。深度休眠中系统限流约 9 分钟一响，更短被静默顺延（不排队）；短间隔买的是息屏初期与被杀后的复活速度。后台不检测时可开启</string>
     <string name="guard_keepalive_heartbeat_interval">心跳间隔</string>
     <string name="guard_heartbeat_interval_tip">深度休眠（Doze）下系统限流约 9 分钟一拍，更短会被静默推迟（不报错）</string>
     <string name="guard_heartbeat_auto">自动（跟随检测间隔，最低 60 秒）</string>

@@ -118,10 +118,11 @@ data class GuardSettings(
     val keepAliveWakeLock: Boolean = KEEP_ALIVE_WAKELOCK_DEFAULT,
 
     /**
-     * 后台保活——心跳闹钟看门狗（免特权，默认开启）：
+     * 后台保活——心跳闹钟看门狗（免特权，默认关闭）：
      * AlarmManager.setAndAllowWhileIdle 自续期一拍闹钟。唤醒锁在深度
      * Doze 中被系统忽略，此闹钟照常触发（补失速检测）；进程被杀后闹钟
-     * 触发自动拉起服务。可关（关后仅剩前台服务+唤醒锁两层保活）。
+     * 触发自动拉起服务。后台不检测时可开启（深度休眠中系统限流约 9
+     * 分钟一拍，详见设置页说明卡片）。
      */
     val keepAliveHeartbeat: Boolean = KEEP_ALIVE_HEARTBEAT_DEFAULT,
 
@@ -231,8 +232,8 @@ data class GuardSettings(
         const val SHOW_PERSISTENT_NOTIFICATION_DEFAULT = true
         /** 默认开启唤醒锁（用户诉求即“后台也要检测”；不想要可在设置关） */
         const val KEEP_ALIVE_WAKELOCK_DEFAULT = true
-        /** 默认开启心跳看门狗（与第十轮“默认配置即生效”行为一致，可关） */
-        const val KEEP_ALIVE_HEARTBEAT_DEFAULT = true
+        /** 默认关闭心跳看门狗（用户要求：默认不启用，后台不检测时手动开） */
+        const val KEEP_ALIVE_HEARTBEAT_DEFAULT = false
         /** 心跳间隔默认自动（0：跟随检测间隔、60 秒下限，与历史行为一致） */
         const val HEARTBEAT_INTERVAL_DEFAULT = 0
         const val VERBOSE_LOG_DEFAULT = true

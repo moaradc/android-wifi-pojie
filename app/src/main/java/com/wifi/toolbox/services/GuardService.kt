@@ -208,8 +208,8 @@ class GuardService : Service() {
      *
      * 下限 60s 兼顾电池（正常态主循环自己跑，心跳仅作失速看门狗，
      * 触发时检测新鲜则只重排闹钟不检测）；非精确闹钟允许系统合并唤醒。
-     * 开关与间隔可在设置页「后台保活」分组调整（默认开/自动，效果与
-     * 默认配置即生效一致）。
+     * 开关与间隔可在设置页「后台保活」分组调整（默认关/自动档；
+     * 遇到后台不检测时可手动开启）。
      */
     private fun scheduleHeartbeat() {
         val am = getSystemService(Context.ALARM_SERVICE) as AlarmManager

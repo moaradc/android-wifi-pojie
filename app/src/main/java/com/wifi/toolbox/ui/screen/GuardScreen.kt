@@ -1465,7 +1465,7 @@ private fun GuardSettingsPage(settings: MutableState<GuardSettings>, app: Toolbo
                 )
             }
             item {
-                // 心跳闹钟看门狗开关（免特权兜底，默认开=与历史默认行为一致）
+                // 心跳闹钟看门狗开关（免特权兜底，默认关：后台不检测时手动开）
                 SwitchPreference(
                     value = s.keepAliveHeartbeat,
                     onValueChange = {
@@ -1527,6 +1527,13 @@ private fun GuardSettingsPage(settings: MutableState<GuardSettings>, app: Toolbo
                         type = ListPreferenceType.DROPDOWN_MENU
                     )
                 }
+            }
+            item {
+                // 说明卡片：心跳闹钟的定位与限制（据用户问答结论濃缩）
+                BannerTip(
+                    text = stringResource(R.string.guard_heartbeat_banner),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                )
             }
             item {
                 // 系统级：电池优化白名单（回前台时自动刷新状态）
