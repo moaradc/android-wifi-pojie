@@ -11,12 +11,12 @@ import android.net.LinkProperties
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import android.net.wifi.SupplicantState
 import android.net.wifi.WifiConfiguration
 import android.net.wifi.WifiManager
 import androidx.compose.runtime.*
 import com.wifi.toolbox.R
 import com.wifi.toolbox.ToolboxApp
-import com.wifi.toolbox.structs.GuardSettings
 import com.wifi.toolbox.structs.PojieSettings
 import com.wifi.toolbox.structs.WifiInfo
 import kotlinx.coroutines.Job
@@ -123,9 +123,32 @@ fun securitySummary(capabilities: String): String {
         has("WPA3") -> "WPA3"
         has("WPA2") -> "WPA2"
         has("WPA-") -> "WPA"
+        has("WEP") -> "WEP"
         has("EAP") -> "EAP"
         capabilities.contains("ESS") -> "OPEN"
         else -> "?"
+    }
+}
+
+/**
+ * 密码长度预校验（与系统 Settings/WifiConfiguration 同规则，PSK 长度为
+ * IEEE 802.11i 规定）：WPA/WPA2/WPA3 密码 8~63 字节（64 位十六进制亦
+ * 合法）；WEP 密码 5/13 位 ASCII 或 10/26 位十六进制。长度不符时系统
+ * addOrUpdateNetwork 直接拒绝（返回 -1）——与其事后收到「连接请求失败：
+ * 添加网络失败」这种无指导意义的长提示，不如在 UI 层提前拦截并给出
+ * 具体原因。返回错误文案资源 id，null = 校验通过。
+ */
+fun passwordLengthErrorRes(security: String, password: String): Int? {
+    if (password.isEmpty()) return null
+    val hex = password.all { it.isDigit() || it in 'a'..'f' || it in 'A'..'F' }
+    val byteLen = password.toByteArray(Charsets.UTF_8).size
+    return when (security) {
+        "WEP" -> if (password.length == 5 || password.length == 13 ||
+            (hex && (password.length == 10 || password.length == 26))) null
+            else R.string.mgr_pwd_len_wep
+        "OPEN" -> null    // 开放网络不应有密码（防御分支）
+        else -> if (byteLen in 8..63 || (byteLen == 64 && hex)) null
+            else R.string.mgr_pwd_len_wpa
     }
 }
 
@@ -177,12 +200,8 @@ interface ManagerController {
     fun clearOpMessage()
 
     // ---- Tab3 当前网络 ----
-    val currentInfo: CurrentNetworkInfo
     val networkEntries: List<NetworkEntry>   // 全部已连接网络（WiFi 可多个 + 移动数据）
     fun refreshCurrent()
-    val diagnosing: Boolean
-    val diagnosisResults: List<com.wifi.toolbox.utils.ProbeResult>
-    fun runDiagnosis()
 
     // ---- 认证网络（Captive Portal）检测 ----
     /** 刚连接成功且被系统判定需要网页认证的 SSID（非空即弹窗提示） */
@@ -222,8 +241,6 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
     var currentInfoState by remember {
         mutableStateOf(CurrentNetworkInfo(false, "", -1, "", 0, 0, 0, "", "", emptyList(), "", 0, false))
     }
-    var diagnosingState by remember { mutableStateOf(false) }
-    var diagnosisResultsState by remember { mutableStateOf<List<ProbeResult>>(emptyList()) }
 
     // ---- Tab3 多网络列表 + 认证网络检测 ----
     var networkEntriesState by remember { mutableStateOf<List<NetworkEntry>>(emptyList()) }
@@ -823,19 +840,35 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
              * 连接已保存网络——完整生命周期：
              * 1. WiFi 关闭时先开启并等待就绪（历史缺陷：直接下发连接命令，
              *    命令静默失败却总提示「√」）；
-             * 2. 下发连接（系统配置 networkId 优先，仅破解记录时用密码新建配置）；
-             * 3. 轮询验证真实连接结果（SSID/netId 双匹配，定位关闭时经特权
-             *    通道解析；历史缺陷：请求发出即报成功）；
-             * 4. 范围外早失败：约 7s 后用扫描结果预检，目标不在附近且尚未连上
-             *    则明确报「不在范围内」，不必等满 20s；
-             * 5. 超时给出失败原因（不在范围内 / 密码已更改）。
+             * 2. 密码长度预校验（不合规直接提示，不下发注定被系统拒绝的
+             *    请求）；
+             * 3. 下发连接（系统配置 networkId 优先，仅破解记录时用密码新建
+             *    配置），记录新建配置的 netId 供认证失败时自动忘记；
+             * 4. 轮询验证真实连接结果（SSID/netId 双匹配 + SupplicantState
+             *    .COMPLETED 握手完成判定；定位关闭时经特权通道解析）；
+             * 5. 密码错误快速判定：已关联却反复断开（wpa_supplicant reason=15
+             *    同源信号）→ 立即报错并自动忘记新建配置，防止错误密码留存；
+             * 6. 范围外早失败：约 7s 后用扫描结果预检；7. 超时给出失败原因。
              */
             override fun connectSaved(entry: SavedNetworkEntry) {
                 if (connectingSsidState != null) return
+                // 密码长度预校验（新建配置路径）：拦截注定失败的请求
+                if (entry.networkId < 0 && entry.password.isNotEmpty()) {
+                    val lenErr = passwordLengthErrorRes(entry.security, entry.password)
+                    if (lenErr != null) {
+                        opMessageState = context.getString(lenErr)
+                        return
+                    }
+                }
                 scope.launch {
                     connectingSsidState = entry.ssid
                     opMessageState = context.getString(R.string.mgr_connecting, entry.ssid)
                     var finalMsg: String? = null
+                    // 本次连接新建配置的 networkId（<0 = 未新建）与下发通道——
+                    // 认证失败时据此自动忘记，防止错误密码配置留存系统
+                    // （下次连接时系统按旧配置重试，永远连不上）
+                    var addedNetId = -1
+                    var connectChannel = 0
                     try {
                         // 1) WiFi 关闭 → 先开启并等待就绪
                         if (!ApiUtil.isWifiEnabled(context)) {
@@ -865,9 +898,10 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
                             delay(1000)
                         }
 
-                        // 2) 下发连接请求
+                        // 2) 下发连接请求（记录新建配置的 netId）
                         try {
                             val channel = channelOrder().first()
+                            connectChannel = channel
                             when {
                                 entry.networkId >= 0 -> when (channel) {
                                     1 -> ShizukuUtil.enableNetwork(entry.networkId)
@@ -876,17 +910,17 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
                                 }
 
                                 entry.password.isNotEmpty() -> when (channel) {
-                                    1 -> ShizukuUtil.connectToWifi(entry.ssid, entry.password)
-                                    2 -> AidlServiceHelper.connectToWifi(app, entry.ssid, entry.password)
-                                    else -> ApiUtil.connectToWifiApi28(context, entry.ssid, entry.password)
+                                    1 -> addedNetId = ShizukuUtil.connectToWifi(entry.ssid, entry.password)
+                                    2 -> addedNetId = AidlServiceHelper.connectToWifi(app, entry.ssid, entry.password)
+                                    else -> addedNetId = ApiUtil.connectToWifiApi28(context, entry.ssid, entry.password)
                                 }
 
                                 // 未保存的开放网络：无需密码，三通道 connectToWifi
                                 // 空密码均构建 OPEN 配置（allowedKeyManagement 置位 0）
                                 entry.security == "OPEN" -> when (channel) {
-                                    1 -> ShizukuUtil.connectToWifi(entry.ssid, "")
-                                    2 -> AidlServiceHelper.connectToWifi(app, entry.ssid, "")
-                                    else -> ApiUtil.connectToWifiApi28(context, entry.ssid, "")
+                                    1 -> addedNetId = ShizukuUtil.connectToWifi(entry.ssid, "")
+                                    2 -> addedNetId = AidlServiceHelper.connectToWifi(app, entry.ssid, "")
+                                    else -> addedNetId = ApiUtil.connectToWifiApi28(context, entry.ssid, "")
                                 }
 
                                 else -> {
@@ -894,13 +928,24 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
                                     return@launch
                                 }
                             }
+                            // 静默失败（addNetwork 返回 -1 不抛异常的通道）：
+                            // 给出可读原因而非让用户对着无限「连接中」
+                            if (addedNetId == -1 && entry.networkId < 0) {
+                                finalMsg = context.getString(R.string.mgr_connect_fail_add)
+                                return@launch
+                            }
                         } catch (e: Exception) {
-                            finalMsg = context.getString(R.string.mgr_connect_fail_request, e.message ?: "?")
+                            // 「添加网络失败」= 系统校验拒绝（密码长度/加密方式
+                            // 不匹配），转译为可读文案；其余异常如实透出
+                            finalMsg = if ((e.message ?: "").contains("添加网络失败"))
+                                context.getString(R.string.mgr_connect_fail_add)
+                            else
+                                context.getString(R.string.mgr_connect_fail_request, e.message ?: "?")
                             return@launch
                         }
 
-                        // 3~5) 等待并验证真实连接结果
-                        finalMsg = awaitConnectionResult(entry)
+                        // 3~6) 等待并验证真实连接结果
+                        finalMsg = awaitConnectionResult(entry, addedNetId, connectChannel)
                     } finally {
                         connectingSsidState = null
                         if (finalMsg != null) opMessageState = finalMsg
@@ -916,45 +961,132 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
                 }
             }
 
-            /** 轮询等待连接到目标网络；返回结果文案 */
-            private suspend fun awaitConnectionResult(entry: SavedNetworkEntry): String {
+            /** 关联/握手阶段的 supplicant 状态集合（目标网络正在被尝试） */
+            val engagedStates = setOf(
+                SupplicantState.ASSOCIATING, SupplicantState.AUTHENTICATING,
+                SupplicantState.ASSOCIATED, SupplicantState.FOUR_WAY_HANDSHAKE,
+                SupplicantState.GROUP_HANDSHAKE
+            )
+
+            /**
+             * 轮询等待连接到目标网络；返回结果文案。
+             *
+             * 【成功判定】身份（SSID/netId）匹配 **且** SupplicantState ==
+             * COMPLETED——官方语义为「4 次握手成功完成」（android.net.wifi
+             * .SupplicantState 文档）。历史缺陷：仅凭 SSID 匹配即报成功，
+             * 而错误密码时关联阶段 SSID 已可读，导致「提示已连接实际永远
+             * 连不上」。
+             *
+             * 【密码错误快速判定】（系统提示「密码错误」的 wpa_supplicant
+             * reason=15 4WAY_HANDSHAKE_TIMEOUT 同源信号）：
+             * - 目标已进入关联/握手阶段后出现 DISCONNECTED/INACTIVE
+             *   （关联成功却断开 = 被 AP 拒绝，而非不在范围内）≥2 次；
+             * - 或关联尝试回合 ≥3（密码错误时系统反复重试）。
+             * 命中即判认证失败：本次新建的配置（[addedNetId] ≥ 0）自动忘记，
+             * 防止错误密码留存系统导致下次连接按旧配置重试；已存在的用户
+             * 配置不动（仅报「密码可能已更改」类提示）。
+             *
+             * supplicant 状态不受定位权限屏蔽（屏蔽仅作用于 SSID/BSSID），
+             * 任何场景都可读；身份在定位关闭时经特权通道解析。
+             */
+            private suspend fun awaitConnectionResult(
+                entry: SavedNetworkEntry,
+                addedNetId: Int,
+                connectChannel: Int
+            ): String {
                 val timeoutMs = 20000L
                 val startAt = System.currentTimeMillis()
                 var scanTriggered = false
                 var rangeChecked = false
                 var lastPrivilegedAt = 0L
+                var engagedEverOnce = false   // 目标进入过关联/握手阶段
+                var wasEngaged = false        // 上一轮轮询是否处于关联阶段（边沿计数）
+                var engagedEpisodes = 0       // 关联尝试回合数（密码错误时递增）
+                var authFailSignals = 0       // 已关联后掉线信号（≥2 次确认，滤瞬态）
                 while (true) {
                     if (!ApiUtil.isWifiEnabled(context)) {
                         return context.getString(R.string.mgr_connect_fail_offline)
                     }
-                    // 快速校验：应用层 WifiInfo（定位可用时 SSID/netId 均可靠）
+                    // 快速校验：应用层 WifiInfo（定位可用时 SSID/netId 均可靠；
+                    // supplicant 状态恒可读）
+                    var supp: SupplicantState? = null
+                    var ssidMatch = false
+                    var idMatch = false
                     try {
                         val wm = context.getSystemService(Context.WIFI_SERVICE) as WifiManager
                         val info = wm.connectionInfo
+                        supp = try { info?.supplicantState } catch (_: Exception) { null }
                         val s = info?.ssid?.removeSurrounding("\"")
                             ?.takeIf { it.isNotEmpty() && it !in badSsids }
-                        if (s == entry.ssid) {
-                            return context.getString(R.string.mgr_connect_ok, entry.ssid)
-                        }
+                        ssidMatch = s == entry.ssid
                         val n = try { info?.networkId ?: -1 } catch (_: Exception) { -1 }
-                        if (n >= 0 && entry.networkId >= 0 && n == entry.networkId) {
-                            return context.getString(R.string.mgr_connect_ok, entry.ssid)
-                        }
+                        idMatch = n >= 0 && entry.networkId >= 0 && n == entry.networkId
                     } catch (_: Exception) {
                     }
-                    // 特权解析（定位关闭时唯一途径，3s 节流）
+
+                    // 成功：身份匹配 + 4 次握手完成（COMPLETED 为稳态，轮询不会错过）
+                    if ((ssidMatch || idMatch) && supp == SupplicantState.COMPLETED) {
+                        return context.getString(R.string.mgr_connect_ok, entry.ssid)
+                    }
+
+                    // 关联阶段边沿计数（每一轮「非关联→关联」记 1 回合）
+                    val engaged = (ssidMatch || idMatch) &&
+                            supp != null && supp in engagedStates
+                    if (engaged) {
+                        if (!wasEngaged) engagedEpisodes++
+                        engagedEverOnce = true
+                    }
+                    wasEngaged = engaged
+
+                    // 特权身份解析（定位关闭时唯一途径，3s 节流）：特权身份
+                    // 对上且（应用层或特权输出的）握手完成 → 成功
                     if (System.currentTimeMillis() - lastPrivilegedAt > 3000) {
                         lastPrivilegedAt = System.currentTimeMillis()
                         try {
-                            val (s, n) = WifiIdentity.resolve(context.applicationContext, app)
-                            if (s == entry.ssid ||
-                                (n >= 0 && entry.networkId >= 0 && n == entry.networkId)
-                            ) {
-                                return context.getString(R.string.mgr_connect_ok, entry.ssid)
+                            val det = WifiIdentity.resolveDetail(context.applicationContext, app)
+                            val privMatch = det.ssid == entry.ssid ||
+                                    (det.netId >= 0 && entry.networkId >= 0 &&
+                                            det.netId == entry.networkId)
+                            if (privMatch) {
+                                if (supp == SupplicantState.COMPLETED || det.supplicantCompleted) {
+                                    return context.getString(R.string.mgr_connect_ok, entry.ssid)
+                                }
+                                engagedEverOnce = true
                             }
                         } catch (_: Exception) {
                         }
                     }
+
+                    // 认证失败信号：目标已关联却断开（密码错误时系统反复重试，
+                    // 信号持续出现；正常连接在信号累积到阈值前已 COMPLETED）
+                    if (engagedEverOnce && !engaged &&
+                        (supp == SupplicantState.DISCONNECTED || supp == SupplicantState.INACTIVE)
+                    ) {
+                        authFailSignals++
+                    }
+                    if (authFailSignals >= 2 || engagedEpisodes >= 3) {
+                        var forgot = false
+                        if (addedNetId >= 0) {
+                            forgot = try {
+                                when (connectChannel) {
+                                    1 -> {
+                                        ShizukuUtil.forgetNetwork(addedNetId); true
+                                    }
+                                    2 -> {
+                                        AidlServiceHelper.forgetNetwork(app, addedNetId); true
+                                    }
+                                    else -> ApiUtil.forgetNetwork(context, addedNetId)
+                                }
+                            } catch (_: Exception) {
+                                false
+                            }
+                        }
+                        return if (forgot)
+                            context.getString(R.string.mgr_connect_fail_auth_forgot, entry.ssid)
+                        else
+                            context.getString(R.string.mgr_connect_fail_auth, entry.ssid)
+                    }
+
                     val elapsed = System.currentTimeMillis() - startAt
                     // 范围外预检：3s 触发一次扫描，7s 读结果——不在附近且未连上 → 早失败
                     if (!scanTriggered && elapsed > 3000) {
@@ -1028,11 +1160,8 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
             override val opMessage get() = opMessageState
             override fun clearOpMessage() { opMessageState = null }
 
-            override val currentInfo get() = currentInfoState
             override val networkEntries get() = networkEntriesState
             override fun refreshCurrent() = readCurrent()
-            override val diagnosing get() = diagnosingState
-            override val diagnosisResults get() = diagnosisResultsState
             override val portalSsid get() = portalSsidState
             override fun clearPortalSsid() {
                 portalJob?.cancel()
@@ -1043,30 +1172,6 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
                 if (!info.connected) return false
                 if (info.ssid.isNotEmpty() && info.ssid == ssid) return true
                 return info.netId >= 0 && networkId >= 0 && info.netId == networkId
-            }
-            override fun runDiagnosis() {
-                if (diagnosing) return
-                scope.launch {
-                    diagnosingState = true
-                    diagnosisResultsState = emptyList()
-                    try {
-                        val healer = WifiHealer(context.applicationContext, app)
-                        // 诊断全开：HTTP 204 + DNS + ICMP + VALIDATED
-                        val probeSettings = GuardSettings(
-                            probeModes = GuardSettings.PROBE_HTTP_204 or
-                                    GuardSettings.PROBE_DNS or
-                                    GuardSettings.PROBE_ICMP or
-                                    GuardSettings.PROBE_VALIDATED,
-                            probeTimeoutMs = 4000
-                        )
-                        val verdict = NetProber.probe(context, probeSettings) { cmd ->
-                            healer.shellExec(cmd)
-                        }
-                        diagnosisResultsState = verdict.results
-                    } catch (_: Exception) {
-                    }
-                    diagnosingState = false
-                }
             }
         }
     }

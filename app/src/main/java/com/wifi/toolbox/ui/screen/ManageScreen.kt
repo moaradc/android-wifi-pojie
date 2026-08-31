@@ -27,6 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -43,6 +44,7 @@ import com.wifi.toolbox.structs.WifiInfo
 import com.wifi.toolbox.ui.items.NavContainer
 import com.wifi.toolbox.ui.items.NavPage
 import com.wifi.toolbox.ui.items.WifiIcon
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import com.wifi.toolbox.ui.items.TagItem
 import com.wifi.toolbox.ui.items.TagType
@@ -203,26 +205,49 @@ private fun ScanTabPage(controller: ManagerController, app: ToolboxApp) {
                     value = pwdInput,
                     onValueChange = { pwdInput = it },
                     label = { Text(stringResource(R.string.mgr_pwd_field_label)) },
+                    // 长度规则随加密类型提示（系统同款校验规则），不合规即时标红
+                    supportingText = {
+                        Text(
+                            stringResource(
+                                if (pwdDialogSec == "WEP") R.string.mgr_pwd_hint_wep
+                                else R.string.mgr_pwd_hint_wpa
+                            )
+                        )
+                    },
+                    isError = pwdInput.isNotEmpty() &&
+                            passwordLengthErrorRes(pwdDialogSec, pwdInput) != null,
                     singleLine = true
                 )
             },
             confirmButton = {
                 TextButton(onClick = {
-                    if (pwdInput.isEmpty()) {
-                        Toast.makeText(
+                    val lenErr = passwordLengthErrorRes(pwdDialogSec, pwdInput)
+                    when {
+                        pwdInput.isEmpty() -> Toast.makeText(
                             context,
                             context.getString(R.string.mgr_pwd_empty),
                             Toast.LENGTH_SHORT
                         ).show()
-                    } else {
-                        controller.connectSaved(
-                            SavedNetworkEntry(
-                                ssid = ssid, networkId = -1, password = pwdInput,
-                                passwordFromPojie = false, fromSystem = false,
-                                security = pwdDialogSec
+
+                        // 长度不合规：具体提示原因并保留对话框供立即修正
+                        // （原缺陷：直接下发请求后收到「连接请求失败：添加
+                        // 网络失败」，冗长且无指导意义）
+                        lenErr != null -> Toast.makeText(
+                            context,
+                            context.getString(lenErr),
+                            Toast.LENGTH_SHORT
+                        ).show()
+
+                        else -> {
+                            controller.connectSaved(
+                                SavedNetworkEntry(
+                                    ssid = ssid, networkId = -1, password = pwdInput,
+                                    passwordFromPojie = false, fromSystem = false,
+                                    security = pwdDialogSec
+                                )
                             )
-                        )
-                        pwdDialogSsid = null
+                            pwdDialogSsid = null
+                        }
                     }
                 }) {
                     Text(stringResource(R.string.mgr_connect))
@@ -333,6 +358,18 @@ private fun ScanTabPage(controller: ManagerController, app: ToolboxApp) {
 
 /** 信号强度标签（四档分界与 AOSP config_wifiRssiLevelThresholds 一致：[-88,-77,-66,-55]） */
 
+/**
+ * 当前网络卡片高亮色：primaryContainer 与 surfaceContainer 按 35:65 混合——
+ * 仍跟随主题取色，但饱和度/明度显著低于纯 primaryContainer（真机反馈
+ * 原高亮过于鲜艳）。两个页面（扫描/已保存）统一使用同一高亮。
+ */
+@Composable
+private fun currentNetworkContainerColor(): Color = lerp(
+    MaterialTheme.colorScheme.surfaceContainer,
+    MaterialTheme.colorScheme.primaryContainer,
+    0.35f
+)
+
 @Composable
 private fun signalLabel(level: Int): String = stringResource(
     when (signalLevel(level)) {
@@ -363,7 +400,7 @@ private fun ScanNetworkCard(
         onClick = onToggle,
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (isCurrent) MaterialTheme.colorScheme.primaryContainer
+            containerColor = if (isCurrent) currentNetworkContainerColor()
             else MaterialTheme.colorScheme.surfaceContainer
         ),
         modifier = Modifier.fillMaxWidth()
@@ -398,11 +435,10 @@ private fun ScanNetworkCard(
                         overflow = TextOverflow.Ellipsis
                     )
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        // 头部标签只保留加密类型/已保存/已破解（真机反馈：
+                        // 「2.4G CH3」「当前」信息冗余——频段信道在展开详情
+                        // 里仍有完整行，当前连接由卡片高亮色表达）
                         TagItem(securitySummary(wifi.capabilities))
-                        if (isCurrent) TagItem(
-                            stringResource(R.string.mgr_current_mark),
-                            TagType.Primary
-                        )
                         if (wifi.savedInfo != null) TagItem(
                             stringResource(R.string.mgr_saved_mark),
                             TagType.Secondary
@@ -411,7 +447,6 @@ private fun ScanNetworkCard(
                             stringResource(R.string.mgr_cracked_mark),
                             TagType.Tertiary
                         )
-                        if (band.isNotEmpty()) TagItem("$band CH$channel")
                     }
                 }
                 Column(horizontalAlignment = Alignment.End) {
@@ -1051,7 +1086,7 @@ private fun SavedNetworkCard(
     Card(
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (isCurrent) MaterialTheme.colorScheme.primaryContainer
+            containerColor = if (isCurrent) currentNetworkContainerColor()
             else MaterialTheme.colorScheme.surfaceContainer
         ),
         modifier = Modifier.fillMaxWidth()
@@ -1218,11 +1253,10 @@ private fun SavedNetworkCard(
     }
 }
 
-// ==================== Tab3：网络（多网络同显）+ 诊断 ====================
+// ==================== Tab3：网络（多网络同显，3 秒自动刷新） ====================
 
 @Composable
 private fun NetworkTabPage(controller: ManagerController) {
-    val info = controller.currentInfo          // 诊断卡的「WiFi 已连接」判定用
     val entries = controller.networkEntries
     val connectedCount = entries.count { it.connected }
 
@@ -1231,8 +1265,15 @@ private fun NetworkTabPage(controller: ManagerController) {
     val multi = connectedCount > 1
     val expandedKeys = remember { mutableStateMapOf<Long, Boolean>() }
 
-    // 进入页面与手动刷新时读取当前网络
-    LaunchedEffect(Unit) { controller.refreshCurrent() }
+    // 进入页面立即读一次，此后每 3 秒自动刷新（信号强度/链路速率/
+    // 验证状态等动态数据不再需要手动刷新）
+    LaunchedEffect(Unit) {
+        controller.refreshCurrent()
+        while (true) {
+            delay(3000)
+            controller.refreshCurrent()
+        }
+    }
     val portalText = stringResource(R.string.mgr_portal)
 
     LazyColumn(
@@ -1240,7 +1281,7 @@ private fun NetworkTabPage(controller: ManagerController) {
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // ---- 概览行：已连接网络数 + 手动刷新 ----
+        // ---- 概览行：已连接网络数 + 自动刷新提示 + 手动刷新 ----
         item {
             Row(
                 modifier = Modifier
@@ -1251,6 +1292,12 @@ private fun NetworkTabPage(controller: ManagerController) {
                 Text(
                     text = stringResource(R.string.mgr_networks_count, connectedCount),
                     style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    text = stringResource(R.string.mgr_net_auto_refresh, 3),
+                    style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(Modifier.weight(1f))
@@ -1280,93 +1327,6 @@ private fun NetworkTabPage(controller: ManagerController) {
                 },
                 portalText = portalText
             )
-        }
-
-        // ---- 诊断卡 ----
-        item {
-            Card(
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainer
-                ),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(Modifier.padding(18.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            Icons.Rounded.HealthAndSafety,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                text = stringResource(R.string.mgr_diagnose),
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = stringResource(R.string.mgr_diagnose_tip),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Button(
-                            onClick = { controller.runDiagnosis() },
-                            enabled = !controller.diagnosing && info.connected
-                        ) {
-                            if (controller.diagnosing) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(14.dp),
-                                    strokeWidth = 2.dp,
-                                    color = MaterialTheme.colorScheme.onPrimary
-                                )
-                            } else {
-                                Text(stringResource(R.string.mgr_diagnose))
-                            }
-                        }
-                    }
-
-                    if (controller.diagnosisResults.isNotEmpty()) {
-                        Spacer(Modifier.height(12.dp))
-                        HorizontalDivider()
-                        Spacer(Modifier.height(10.dp))
-                        controller.diagnosisResults.forEach { result ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    if (result.ok) Icons.Rounded.CheckCircle
-                                    else Icons.Rounded.Cancel,
-                                    contentDescription = null,
-                                    tint = if (result.ok) Color(0xFF2E7D32) else Color(0xFFC62828),
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Spacer(Modifier.width(8.dp))
-                                Text(
-                                    text = result.mode,
-                                    style = MaterialTheme.typography.labelLarge,
-                                    fontFamily = FontFamily.Monospace,
-                                    modifier = Modifier.width(88.dp)
-                                )
-                                Text(
-                                    text = if (result.isPortal) portalText else result.detail,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontFamily = FontFamily.Monospace,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
         }
     }
 }

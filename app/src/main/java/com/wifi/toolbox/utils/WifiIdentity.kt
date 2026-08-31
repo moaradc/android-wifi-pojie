@@ -1,6 +1,7 @@
 package com.wifi.toolbox.utils
 
 import android.content.Context
+import android.net.wifi.SupplicantState
 import android.net.wifi.WifiManager
 import com.wifi.toolbox.ToolboxApp
 import com.wifi.toolbox.structs.GuardSettings
@@ -38,10 +39,31 @@ object WifiIdentity {
     /** 无效占位：应用层/特权输出中被系统屏蔽的 SSID 标记 */
     private val BAD_SSIDS = setOf("<unknown ssid>", "<none>", "unknown ssid", "0x")
 
+    /** 身份解析结果（含 supplicant 完成位） */
+    data class Identity(
+        val ssid: String,
+        val netId: Int,
+        /** 握手是否已完成（应用层 supplicantState==COMPLETED，或特权输出解析所得） */
+        val supplicantCompleted: Boolean
+    )
+
     /** 解析当前 WiFi 身份：返回 (ssid, networkId)，ssid 为空串表示不可得 */
     suspend fun resolve(context: Context, app: ToolboxApp?): Pair<String, Int> {
+        val d = resolveDetail(context, app)
+        return d.ssid to d.netId
+    }
+
+    /**
+     * 解析当前 WiFi 身份与握手完成位。完成位取两处：
+     * 1. 应用层 WifiInfo.getSupplicantState()（不受定位屏蔽，恒可读）；
+     * 2. 特权输出中的 `Supplicant state: COMPLETED` 字段（WifiInfo.toString
+     *    标准格式，cmd wifi status 与 dumpsys wifi 均含）。
+     * 关联/握手阶段该位为 false——「关联成功但握手未完成」不能算连通。
+     */
+    suspend fun resolveDetail(context: Context, app: ToolboxApp?): Identity {
         var ssid = ""
         var netId = -1
+        var completed = false
         try {
             val wm = context.getSystemService(Context.WIFI_SERVICE) as WifiManager
             @Suppress("DEPRECATION")
@@ -49,6 +71,7 @@ object WifiIdentity {
             val raw = info?.ssid?.removeSurrounding("\"").orEmpty()
             if (raw.isNotEmpty() && raw !in BAD_SSIDS) ssid = raw
             if (info != null) netId = info.networkId
+            completed = info?.supplicantState == SupplicantState.COMPLETED
         } catch (_: Exception) {
         }
         if (ssid.isEmpty() || netId == -1) {
@@ -60,6 +83,7 @@ object WifiIdentity {
                         if (ssid.isEmpty()) ssid = s
                         if (netId == -1) netId = n
                     }
+                    completed = completed || parseSupplicantCompleted(status)
                 }
                 if (ssid.isEmpty() || netId == -1) {
                     // 通用兜底：dumpsys wifi 的 mWifiInfo 行（含 SSID 与 Net ID）
@@ -68,11 +92,12 @@ object WifiIdentity {
                         if (ssid.isEmpty()) ssid = s
                         if (netId == -1) netId = n
                     }
+                    completed = completed || parseSupplicantCompleted(dump)
                 }
             } catch (_: Exception) {
             }
         }
-        return ssid to netId
+        return Identity(ssid, netId, completed)
     }
 
     /**
@@ -117,6 +142,17 @@ object WifiIdentity {
             .find(output)?.groupValues?.get(1)?.toIntOrNull() ?: -1
         return ssid to netId
     }
+
+    /**
+     * 解析输出中的 supplicant 完成位：WifiInfo.toString 标准格式含
+     * `Supplicant state: COMPLETED` 字段（cmd wifi status 的 WifiInfo 行
+     * 与 dumpsys wifi 的 mWifiInfo 行均同源）。关联/握手阶段此值为
+     * ASSOCIATED 等非完成态——即「关联成功但握手未完成」，不能算连通。
+     */
+    internal fun parseSupplicantCompleted(output: String): Boolean =
+        Regex("Supplicant state:\\s*([A-Za-z_]+)", RegexOption.IGNORE_CASE)
+            .find(output)?.groupValues?.get(1)
+            ?.equals("completed", ignoreCase = true) == true
 
     /** 清洗 SSID：去首尾引号/空白，过滤系统屏蔽占位（<unknown ssid> 等） */
     private fun cleanSsid(raw: String): String {

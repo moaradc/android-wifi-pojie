@@ -154,8 +154,6 @@
     <string name="mgr_lbl_dns">DNS</string>
     <string name="mgr_lbl_dhcp">DHCP 服务器</string>
     <string name="mgr_lbl_lease">租约</string>
-    <string name="mgr_diagnose">网络诊断</string>
-    <string name="mgr_diagnose_tip">四项探测：HTTP 204 / DNS / ICMP / 系统验证</string>
     <string name="mgr_validated">已验证</string>
     <string name="mgr_not_validated">未验证</string>
     <string name="mgr_portal">疑似门户认证</string>
@@ -175,6 +173,14 @@
     <string name="mgr_connect_fail_range">✗ 未在附近扫描到「%1$s」，可能不在信号范围内</string>
     <string name="mgr_connect_fail_timeout">✗ 连接超时：可能不在范围内或密码已更改</string>
     <string name="mgr_connect_fail_request">✗ 连接请求失败：%1$s</string>
+    <string name="mgr_pwd_len_wpa">✗ 密码长度无效：WPA/WPA2/WPA3 密码需 8~63 位字符</string>
+    <string name="mgr_pwd_len_wep">✗ 密码长度无效：WEP 密码需 5 或 13 位（或 10/26 位十六进制）</string>
+    <string name="mgr_pwd_hint_wpa">WPA/WPA2/WPA3 密码需 8~63 位字符</string>
+    <string name="mgr_pwd_hint_wep">WEP 密码需 5 或 13 位（或 10/26 位十六进制）</string>
+    <string name="mgr_connect_fail_add">✗ 系统拒绝了该网络配置：密码长度或加密方式不匹配</string>
+    <string name="mgr_connect_fail_auth">✗「%1$s」认证失败：密码错误或被网络拒绝</string>
+    <string name="mgr_connect_fail_auth_forgot">✗「%1$s」认证失败：密码错误或被网络拒绝，已自动忘记该网络</string>
+    <string name="mgr_net_auto_refresh">每 %1$d 秒自动刷新</string>
     <string name="mgr_filter_empty">当前筛选条件下没有网络</string>
     <string name="mgr_filter_empty_tip">试试切换筛选或排序条件</string>
     <string name="mgr_pwd_dialog_title">连接「%1$s」</string>

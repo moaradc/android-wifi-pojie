@@ -153,8 +153,6 @@
     <string name="mgr_lbl_dns">DNS</string>
     <string name="mgr_lbl_dhcp">DHCP server</string>
     <string name="mgr_lbl_lease">Lease</string>
-    <string name="mgr_diagnose">Diagnose</string>
-    <string name="mgr_diagnose_tip">Four probes: HTTP 204 / DNS / ICMP / system validation</string>
     <string name="mgr_validated">Validated</string>
     <string name="mgr_not_validated">Not validated</string>
     <string name="mgr_portal">Possible captive portal</string>
@@ -174,6 +172,14 @@
     <string name="mgr_connect_fail_range">✗ "%1$s" not found nearby; it may be out of range</string>
     <string name="mgr_connect_fail_timeout">✗ Connection timed out: out of range or password changed</string>
     <string name="mgr_connect_fail_request">✗ Connection request failed: %1$s</string>
+    <string name="mgr_pwd_len_wpa">✗ Invalid password length: WPA/WPA2/WPA3 passwords must be 8-63 characters</string>
+    <string name="mgr_pwd_len_wep">✗ Invalid password length: WEP passwords must be 5 or 13 characters (or 10/26 hex digits)</string>
+    <string name="mgr_pwd_hint_wpa">WPA/WPA2/WPA3 password: 8-63 characters</string>
+    <string name="mgr_pwd_hint_wep">WEP password: 5 or 13 characters (or 10/26 hex digits)</string>
+    <string name="mgr_connect_fail_add">✗ System rejected this network config: password length or security type mismatch</string>
+    <string name="mgr_connect_fail_auth">✗ Authentication failed for "%1$s": wrong password or rejected by the network</string>
+    <string name="mgr_connect_fail_auth_forgot">✗ Authentication failed for "%1$s": wrong password or rejected by the network, network removed automatically</string>
+    <string name="mgr_net_auto_refresh">Auto-refresh every %1$d s</string>
     <string name="mgr_filter_empty">No networks match the current filter</string>
     <string name="mgr_filter_empty_tip">Try a different filter or sort order</string>
     <string name="mgr_pwd_dialog_title">Link to %1$s</string>
