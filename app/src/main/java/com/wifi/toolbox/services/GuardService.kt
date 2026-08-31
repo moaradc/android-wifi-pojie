@@ -278,7 +278,13 @@ class GuardService : Service() {
             }
             // 自动保存日志：将本轮新增日志追加到当天滚动文件（设置关闭时无动作）
             autoSaveFlush()
-            val interval = settings.checkIntervalSec * 1000L
+            // 疑似断网（防抖中）用独立快间隔：加速防抖确认与恢复发现；
+            // 0/其他状态（在线/链路断/Portal等）用例行检测间隔
+            val interval = (
+                    if (GuardState.currentState == GuardState.STATE_SUSPECT &&
+                        settings.suspectIntervalSec > 0
+                    ) settings.suspectIntervalSec else settings.checkIntervalSec
+                    ) * 1000L
             // 分片睡眠：设置改小后能尽快生效，同时熄屏下不额外唤醒
             var slept = 0L
             while (slept < interval && scope.isActive) {
@@ -515,10 +521,11 @@ class GuardService : Service() {
             }
         } else {
             consecutiveHealFails++
-            // 登记下一个退避窗口（时间戳门槛，performHeal 入口按此跳过等待）
-            val backoff = settings.healCooldownBaseSec * 1000L *
-                    (1L shl minOf(consecutiveHealFails, settings.maxBackoffPower).coerceAtMost(16))
-            val capped = minOf(backoff, 15 * 60 * 1000L)
+            // 登记下一个退避窗口（时间戳门槛，performHeal 入口按此跳过等待）。
+            // 固定等待：用户需求移除指数翻倍——设置多少秒就等多少秒，
+            // 行为可预期（不再 30→60→120→…→15分钟封顶翻倍）；
+            // 熔断次数上限（healMaxAttempts）仍负责防路由器断电空转
+            val capped = settings.healCooldownBaseSec * 1000L
             backoffUntilMs = System.currentTimeMillis() + capped
             backoffSkipNotified = false
             GuardState.currentState = GuardState.STATE_HEAL_FAILED

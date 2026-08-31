@@ -1040,6 +1040,8 @@ private fun GuardSettingsPage(settings: MutableState<GuardSettings>, app: Toolbo
 
     var showCustomInterval by remember { mutableStateOf(false) }
     var customIntervalText by remember { mutableStateOf(s.checkIntervalSec.toString()) }
+    var showCustomSuspect by remember { mutableStateOf(false) }
+    var customSuspectText by remember { mutableStateOf(s.suspectIntervalSec.toString()) }
     var showLogTypeDialog by remember { mutableStateOf(false) }
     var showLogDirDialog by remember { mutableStateOf(false) }
     var showCustomActionsDialog by remember { mutableStateOf(false) }
@@ -1204,6 +1206,49 @@ private fun GuardSettingsPage(settings: MutableState<GuardSettings>, app: Toolbo
                         showCustomInterval = true
                     }
                 )
+            }
+            item {
+                // 疑似断网（防抖中）的独立快间隔：0=跟随检测间隔（默认，与历史一致）
+                val spPresets = GuardSettings.SUSPECT_INTERVAL_PRESETS
+                val spLabels = spPresets.map { sec ->
+                    if (sec == 0) context.getString(R.string.guard_suspect_interval_follow)
+                    else context.getString(R.string.guard_interval_value, sec)
+                }
+                val spIndex = spPresets.indexOf(s.suspectIntervalSec)
+                ListPreference(
+                    value = if (spIndex >= 0) spIndex else 0,
+                    onValueChange = { index ->
+                        if (index in spPresets.indices) {
+                            settings.value = s.copy(suspectIntervalSec = spPresets[index])
+                        }
+                    },
+                    title = { Text(stringResource(R.string.guard_suspect_interval)) },
+                    summary = {
+                        Text(
+                            if (spIndex >= 0) spLabels[spIndex]
+                            else stringResource(
+                                R.string.guard_interval_custom_value, s.suspectIntervalSec
+                            )
+                        )
+                    },
+                    icon = { Icon(Icons.Filled.Speed, null) },
+                    values = spPresets.indices.toList(),
+                    valueToText = { i: Int -> AnnotatedString(spLabels[i]) },
+                    type = ListPreferenceType.DROPDOWN_MENU
+                )
+            }
+            if (s.suspectIntervalSec != 0) {
+                item {
+                    Preference(
+                        title = { Text(stringResource(R.string.guard_suspect_interval_custom)) },
+                        summary = { Text(stringResource(R.string.guard_suspect_interval_custom_tip)) },
+                        icon = { Icon(Icons.Filled.Edit, null) },
+                        onClick = {
+                            customSuspectText = s.suspectIntervalSec.toString()
+                            showCustomSuspect = true
+                        }
+                    )
+                }
             }
             item {
                 SwitchPreference(
@@ -1680,6 +1725,36 @@ private fun GuardSettingsPage(settings: MutableState<GuardSettings>, app: Toolbo
             },
             dismissButton = {
                 TextButton(onClick = { showCustomInterval = false }) {
+                    Text(stringResource(R.string.btn_cancel))
+                }
+            }
+        )
+    }
+
+    // ---- 疑似间隔自定义对话框 ----
+    if (showCustomSuspect) {
+        AlertDialog(
+            onDismissRequest = { showCustomSuspect = false },
+            title = { Text(stringResource(R.string.guard_suspect_interval_custom)) },
+            text = {
+                OutlinedTextField(
+                    value = customSuspectText,
+                    onValueChange = { customSuspectText = it.filter { c -> c.isDigit() }.take(3) },
+                    label = { Text(stringResource(R.string.guard_suspect_interval_custom_input)) },
+                    supportingText = { Text(stringResource(R.string.guard_suspect_interval_custom_range)) },
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    customSuspectText.toIntOrNull()?.let { sec ->
+                        settings.value = s.copy(suspectIntervalSec = sec.coerceIn(5, 600))
+                    }
+                    showCustomSuspect = false
+                }) { Text(stringResource(R.string.btn_ok)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCustomSuspect = false }) {
                     Text(stringResource(R.string.btn_cancel))
                 }
             }

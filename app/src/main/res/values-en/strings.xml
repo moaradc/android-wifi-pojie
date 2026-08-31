@@ -287,6 +287,12 @@
     <string name="guard_interval_custom_tip">Enter a custom check interval between 5-3600 seconds</string>
     <string name="guard_interval_custom_input">Seconds (5-3600)</string>
     <string name="guard_interval_custom_range">Range 5-3600s; shorter drains battery faster</string>
+    <string name="guard_suspect_interval">Suspect interval</string>
+    <string name="guard_suspect_interval_follow">Follow check interval</string>
+    <string name="guard_suspect_interval_custom">Custom suspect interval…</string>
+    <string name="guard_suspect_interval_custom_tip">Enter a custom suspect interval between 5 and 600 seconds</string>
+    <string name="guard_suspect_interval_custom_input">Seconds (5-600)</string>
+    <string name="guard_suspect_interval_custom_range">Range 5~600 seconds; too short drains battery</string>
     <string name="guard_check_on_change">Check on network change</string>
     <string name="guard_check_on_change_tip">Probe immediately on WiFi reconnect/switch</string>
     <string name="guard_only_wifi">Only guard on WiFi</string>
@@ -301,7 +307,7 @@
     <string name="guard_heal_verify_timeout">Verify timeout after reconnect</string>
     <string name="guard_sec_value">%1$ds</string>
     <string name="guard_cooldown_base">Backoff base</string>
-    <string name="guard_cooldown_base_tip">After consecutive failures, wait doubles from %1$ds base to avoid hammering</string>
+    <string name="guard_cooldown_base_tip">Fixed wait of %1$ds before retrying after a failed heal (no doubling); runaway retries are capped separately</string>
     <string name="guard_heal_channel">Heal channel</string>
     <string name="guard_channel_auto">Auto (Shizuku→Root→API)</string>
     <string name="guard_channel_aidl">Root AIDL</string>

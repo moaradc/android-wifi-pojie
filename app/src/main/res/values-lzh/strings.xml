@@ -287,6 +287,12 @@
     <string name="guard_interval_custom_tip">輸入 5-3600 秒之間的自定義檢測間隔</string>
     <string name="guard_interval_custom_input">秒數（5-3600）</string>
     <string name="guard_interval_custom_range">範圍 5~3600 秒，過短會增加耗電</string>
+    <string name="guard_suspect_interval">疑似斷網檢測間隔</string>
+    <string name="guard_suspect_interval_follow">跟隨檢測間隔</string>
+    <string name="guard_suspect_interval_custom">自定義疑似間隔…</string>
+    <string name="guard_suspect_interval_custom_tip">輸入 5-600 秒之間的自定義疑似間隔</string>
+    <string name="guard_suspect_interval_custom_input">秒數（5-600）</string>
+    <string name="guard_suspect_interval_custom_range">範圍 5~600 秒，過短會增加耗電</string>
     <string name="guard_check_on_change">網路變化立即檢測</string>
     <string name="guard_check_on_change_tip">WiFi 重連/切換時即檢一次，免候計時</string>
     <string name="guard_only_wifi">僅在 WiFi 連線時守護</string>
@@ -301,7 +307,7 @@
     <string name="guard_heal_verify_timeout">重連後驗證超時</string>
     <string name="guard_sec_value">%1$ds</string>
     <string name="guard_cooldown_base">退避基數</string>
-    <string name="guard_cooldown_base_tip">連續自癒失敗後按 %1$ds 基數翻倍等待，防止路由器斷電時空轉</string>
+    <string name="guard_cooldown_base_tip">自癒失敗後固定等待 %1$ds 再重試（不再翻倍）；防空轉由重試上限負責</string>
     <string name="guard_heal_channel">自癒執行通道</string>
     <string name="guard_channel_auto">自動（Shizuku→Root→API）</string>
     <string name="guard_channel_aidl">Root AIDL</string>

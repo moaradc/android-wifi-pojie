@@ -29,9 +29,17 @@ data class GuardSettings(
 
     // ==================== 检测时机 ====================
     /**
-     * 定时检测间隔（秒）。预设：10/30/60/120/300，或自定义 5-3600
+     * 检测间隔（秒）：主循环在线/空闲态的例行检测节奏
      */
     val checkIntervalSec: Int = CHECK_INTERVAL_SEC_DEFAULT,
+
+    /**
+     * 疑似断网检测间隔（秒）：正常检测中出现失败（防抖中，未达断网阈值）
+     * 时下一轮的快节奏确认间隔。0 = 跟随检测间隔（与历史行为一致）；
+     * >0 = 独立快间隔（如 10s，加速防抖确认或快速发现恢复）。预设见
+     * SUSPECT_INTERVAL_PRESETS，自定义 5~600 秒。
+     */
+    val suspectIntervalSec: Int = SUSPECT_INTERVAL_DEFAULT,
 
     /**
      * 网络切换时立即检测（WiFi 重连/网络变化广播触发即时探测）
@@ -69,15 +77,10 @@ data class GuardSettings(
     val healVerifyTimeoutSec: Int = HEAL_VERIFY_TIMEOUT_SEC_DEFAULT,
 
     /**
-     * 自愈期间使用指数退避：连续自愈失败后，等待时间按此基数翻倍
-     * （秒）。防止路由器已断电/光猫故障时的无效轰炸。
+     * 自愈失败后等待多久再试（秒，固定值不再翻倍）：防止路由器
+     * 已断电/光猫故障时的无效轰炸。防空转主要由熔断次数上限负责。
      */
     val healCooldownBaseSec: Int = HEAL_COOLDOWN_BASE_SEC_DEFAULT,
-
-    /**
-     * 最大冷却倍数上限（backoff 上限 = cooldownBase * 2^maxBackoffPower）
-     */
-    val maxBackoffPower: Int = MAX_BACKOFF_POWER_DEFAULT,
 
     /**
      * 连续自愈次数上限（熔断阈值，参考 Circuit Breaker 模式）：
@@ -187,13 +190,13 @@ data class GuardSettings(
         const val PROBE_TIMEOUT_MS_KEY = "guard_probe_timeout_ms"
         const val FAIL_THRESHOLD_KEY = "guard_fail_threshold"
         const val CHECK_INTERVAL_SEC_KEY = "guard_check_interval_sec"
+        const val SUSPECT_INTERVAL_SEC_KEY = "guard_suspect_interval_sec"
         const val CHECK_ON_NETWORK_CHANGE_KEY = "guard_check_on_network_change"
         const val ONLY_WHEN_WIFI_CONNECTED_KEY = "guard_only_when_wifi_connected"
         const val HEAL_STRATEGY_KEY = "guard_heal_strategy"
         const val CUSTOM_HEAL_ACTIONS_KEY = "guard_custom_heal_actions"
         const val HEAL_VERIFY_TIMEOUT_SEC_KEY = "guard_heal_verify_timeout_sec"
         const val HEAL_COOLDOWN_BASE_SEC_KEY = "guard_heal_cooldown_base_sec"
-        const val MAX_BACKOFF_POWER_KEY = "guard_max_backoff_power"
         const val HEAL_MAX_ATTEMPTS_KEY = "guard_heal_max_attempts"
         const val SKIP_WHEN_WIFI_DISCONNECTED_KEY = "guard_skip_when_wifi_disconnected"
         const val SKIP_ON_CAPTIVE_PORTAL_KEY = "guard_skip_on_captive_portal"
@@ -216,13 +219,14 @@ data class GuardSettings(
         const val PROBE_TIMEOUT_MS_DEFAULT = 4000
         const val FAIL_THRESHOLD_DEFAULT = 2
         const val CHECK_INTERVAL_SEC_DEFAULT = 30
+        /** 疑似间隔默认跟随检测间隔（0=哨兵：与历史行为严格一致） */
+        const val SUSPECT_INTERVAL_DEFAULT = 0
         const val CHECK_ON_NETWORK_CHANGE_DEFAULT = true
         const val ONLY_WHEN_WIFI_CONNECTED_DEFAULT = true
         const val HEAL_STRATEGY_DEFAULT = 2
         const val CUSTOM_HEAL_ACTIONS_DEFAULT = ""
         const val HEAL_VERIFY_TIMEOUT_SEC_DEFAULT = 20
         const val HEAL_COOLDOWN_BASE_SEC_DEFAULT = 30
-        const val MAX_BACKOFF_POWER_DEFAULT = 4
         /** 默认无限重试（保持旧行为）；可选 2/3/5/10 次上限 */
         const val HEAL_MAX_ATTEMPTS_DEFAULT = 0
         const val SKIP_WHEN_WIFI_DISCONNECTED_DEFAULT = true
@@ -269,6 +273,9 @@ data class GuardSettings(
         /** 检测预设时间间隔（秒） */
         val INTERVAL_PRESETS = listOf(10, 30, 60, 120, 300)
 
+        /** 疑似间隔预设（秒；0 = 跟随检测间隔） */
+        val SUSPECT_INTERVAL_PRESETS = listOf(0, 5, 10, 15, 30, 60)
+
         /** 心跳间隔预设（秒；0 = 自动跟随检测间隔） */
         val HEARTBEAT_INTERVAL_PRESETS = listOf(0, 60, 120, 180, 300, 600, 900)
 
@@ -280,6 +287,9 @@ data class GuardSettings(
                 checkIntervalSec = prefs.getInt(
                     CHECK_INTERVAL_SEC_KEY, CHECK_INTERVAL_SEC_DEFAULT
                 ).coerceIn(5, 3600),
+                suspectIntervalSec = prefs.getInt(
+                    SUSPECT_INTERVAL_SEC_KEY, SUSPECT_INTERVAL_DEFAULT
+                ).coerceIn(0, 600),
                 checkOnNetworkChange = prefs.getBoolean(
                     CHECK_ON_NETWORK_CHANGE_KEY, CHECK_ON_NETWORK_CHANGE_DEFAULT
                 ),
@@ -296,8 +306,6 @@ data class GuardSettings(
                 healCooldownBaseSec = prefs.getInt(
                     HEAL_COOLDOWN_BASE_SEC_KEY, HEAL_COOLDOWN_BASE_SEC_DEFAULT
                 ).coerceIn(5, 600),
-                maxBackoffPower = prefs.getInt(MAX_BACKOFF_POWER_KEY, MAX_BACKOFF_POWER_DEFAULT)
-                    .coerceIn(1, 8),
                 healMaxAttempts = prefs.getInt(
                     HEAL_MAX_ATTEMPTS_KEY, HEAL_MAX_ATTEMPTS_DEFAULT
                 ).coerceIn(0, 99),
