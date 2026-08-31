@@ -39,13 +39,18 @@ object WifiIdentity {
     /** 无效占位：应用层/特权输出中被系统屏蔽的 SSID 标记 */
     private val BAD_SSIDS = setOf("<unknown ssid>", "<none>", "unknown ssid", "0x")
 
-    /** 身份解析结果（含 supplicant 完成位） */
+    /** 身份解析结果（含 supplicant 完成位与 BSSID） */
     data class Identity(
         val ssid: String,
         val netId: Int,
         /** 握手是否已完成（应用层 supplicantState==COMPLETED，或特权输出解析所得） */
-        val supplicantCompleted: Boolean
+        val supplicantCompleted: Boolean,
+        /** 当前连接的 BSSID（应用层被匿名化/为空时经特权输出解析；空串=不可得） */
+        val bssid: String = ""
     )
+
+    /** 特权输出解析结果（cmd wifi status 与 dumpsys 同源的 WifiInfo 行格式） */
+    internal data class ParsedInfo(val ssid: String, val bssid: String, val netId: Int)
 
     /** 解析当前 WiFi 身份：返回 (ssid, networkId)，ssid 为空串表示不可得 */
     suspend fun resolve(context: Context, app: ToolboxApp?): Pair<String, Int> {
@@ -59,11 +64,18 @@ object WifiIdentity {
      * 2. 特权输出中的 `Supplicant state: COMPLETED` 字段（WifiInfo.toString
      *    标准格式，cmd wifi status 与 dumpsys wifi 均含）。
      * 关联/握手阶段该位为 false——「关联成功但握手未完成」不能算连通。
+     *
+     * BSSID 同链路解析（真机反馈：未开启定位时网络页 BSSID 恒显「已隐藏」，
+     * 而扫描页经 Shizuku 能显示——同一特权通道应一并兜底）：应用层
+     * getBSSID() 在定位关闭时与 SSID 受同一套 REDACT 屏蔽，返回匿名化
+     * 占位 02:00:00:00:00:00；特权 shell（NETWORK_SETTINGS 持有者）输出
+     * 不屏蔽，WifiInfo 行同一行内即含真实 BSSID。
      */
     suspend fun resolveDetail(context: Context, app: ToolboxApp?): Identity {
         var ssid = ""
         var netId = -1
         var completed = false
+        var bssid = ""
         try {
             val wm = context.getSystemService(Context.WIFI_SERVICE) as WifiManager
             @Suppress("DEPRECATION")
@@ -72,32 +84,40 @@ object WifiIdentity {
             if (raw.isNotEmpty() && raw !in BAD_SSIDS) ssid = raw
             if (info != null) netId = info.networkId
             completed = info?.supplicantState == SupplicantState.COMPLETED
+            // 应用层 BSSID：匿名化占位（定位关闭等场景）视同不可得，
+            // 留待特权输出解析真实值
+            val rawBssid = try { info?.bssid.orEmpty() } catch (_: Exception) { "" }
+            if (rawBssid.isNotEmpty() && !rawBssid.equals(ANONYMIZED_BSSID, true)) {
+                bssid = rawBssid
+            }
         } catch (_: Exception) {
         }
-        if (ssid.isEmpty() || netId == -1) {
+        if (ssid.isEmpty() || netId == -1 || bssid.isEmpty()) {
             try {
-                // Android 11+：cmd wifi status（一次输出同时含 SSID 与 Net ID）
-                if (ssid.isEmpty() || netId == -1) {
+                // Android 11+：cmd wifi status（一次输出同时含 SSID/BSSID/Net ID）
+                if (ssid.isEmpty() || netId == -1 || bssid.isEmpty()) {
                     val status = privilegedExec(context, app, "cmd wifi status")
-                    parseStatusOutput(status).let { (s, n) ->
-                        if (ssid.isEmpty()) ssid = s
-                        if (netId == -1) netId = n
+                    parseStatusOutput(status).let { p ->
+                        if (ssid.isEmpty()) ssid = p.ssid
+                        if (netId == -1) netId = p.netId
+                        if (bssid.isEmpty()) bssid = p.bssid
                     }
                     completed = completed || parseSupplicantCompleted(status)
                 }
-                if (ssid.isEmpty() || netId == -1) {
-                    // 通用兜底：dumpsys wifi 的 mWifiInfo 行（含 SSID 与 Net ID）
+                if (ssid.isEmpty() || netId == -1 || bssid.isEmpty()) {
+                    // 通用兜底：dumpsys wifi 的 mWifiInfo 行（同一行含 SSID/BSSID/Net ID）
                     val dump = privilegedExec(context, app, "dumpsys wifi")
-                    parseDumpsysOutput(dump).let { (s, n) ->
-                        if (ssid.isEmpty()) ssid = s
-                        if (netId == -1) netId = n
+                    parseDumpsysOutput(dump).let { p ->
+                        if (ssid.isEmpty()) ssid = p.ssid
+                        if (netId == -1) netId = p.netId
+                        if (bssid.isEmpty()) bssid = p.bssid
                     }
                     completed = completed || parseSupplicantCompleted(dump)
                 }
             } catch (_: Exception) {
             }
         }
-        return Identity(ssid, netId, completed)
+        return Identity(ssid, netId, completed, bssid)
     }
 
     /**
@@ -106,22 +126,23 @@ object WifiIdentity {
      *   WifiInfo: SSID: "MyWiFi", BSSID: aa:bb:cc:dd:ee:ff, ..., Net ID: 12, ...
      * 未连接时输出 `Wifi is not connected`。
      */
-    internal fun parseStatusOutput(output: String): Pair<String, Int> {
+    internal fun parseStatusOutput(output: String): ParsedInfo {
         var ssid = ""
-        var netId = -1
         // ① 主行：Wifi is connected to <getSSID()>（带引号/十六进制/unknown 三态）
         Regex("Wifi is connected to (.+)")
             .find(output)?.groupValues?.get(1)
             ?.let { cleanSsid(it) }?.let { if (it.isNotEmpty()) ssid = it }
-        // ② WifiInfo 行兜底（SSID 与 Net ID 同行，SSID 可含逗号 → 截到 ", BSSID:"）
+        // ② WifiInfo 行兜底（SSID/BSSID/Net ID 同行，SSID 可含逗号 → 截到 ", BSSID:"）
         if (ssid.isEmpty()) {
             Regex("WifiInfo: SSID: (.*?), BSSID:")
                 .find(output)?.groupValues?.get(1)
                 ?.let { cleanSsid(it) }?.let { if (it.isNotEmpty()) ssid = it }
         }
-        netId = Regex("Net ID: (\\d+)")
+        val netId = Regex("Net ID: (\\d+)")
             .find(output)?.groupValues?.get(1)?.toIntOrNull() ?: -1
-        return ssid to netId
+        // BSSID 取 WifiInfo 行内真实 MAC（不取扫描结果区——此处解析的是连接信息）
+        val bssid = parseBssidOfInfoLine(output)
+        return ParsedInfo(ssid, bssid, netId)
     }
 
     /**
@@ -129,7 +150,7 @@ object WifiIdentity {
      *   mWifiInfo SSID: "MyWiFi", BSSID: aa:bb:cc:dd:ee:ff, ..., Net ID: 12, ...
      * 取第一条有效 mWifiInfo 行（多 ClientModeManager 场景下首个即主 STA）。
      */
-    internal fun parseDumpsysOutput(output: String): Pair<String, Int> {
+    internal fun parseDumpsysOutput(output: String): ParsedInfo {
         var ssid = ""
         for (m in Regex("mWifiInfo SSID: (.*?), BSSID:").findAll(output)) {
             val s = cleanSsid(m.groupValues[1])
@@ -140,7 +161,22 @@ object WifiIdentity {
         }
         val netId = Regex("Net ID: (\\d+)")
             .find(output)?.groupValues?.get(1)?.toIntOrNull() ?: -1
-        return ssid to netId
+        val bssid = parseBssidOfInfoLine(output)
+        return ParsedInfo(ssid, bssid, netId)
+    }
+
+    /**
+     * 解析输出中 WifiInfo 行的 BSSID（WifiInfo.toString 标准格式
+     * `SSID: ..., BSSID: aa:bb:cc:dd:ee:ff, ...`，cmd wifi status 与
+     * dumpsys wifi 同源）。仅接受标准 MAC 形态并过滤匿名化占位——
+     * 防止个别 ROM 特权输出仍被脱敏时把假地址当真值。
+     */
+    internal fun parseBssidOfInfoLine(output: String): String {
+        Regex("BSSID: ([0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5})")
+            .find(output)?.groupValues?.get(1)
+            ?.takeIf { it.isNotEmpty() && !it.equals(ANONYMIZED_BSSID, true) }
+            ?.let { return it }
+        return ""
     }
 
     /**

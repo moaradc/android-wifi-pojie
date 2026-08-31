@@ -199,7 +199,7 @@
     <string name="mgr_lbl_roaming">漫游</string>
     <string name="mgr_yes">是</string>
     <string name="mgr_no">否</string>
-    <string name="mgr_bssid_hidden">BSSID 已被系统隐藏（开启系统定位后可显示）</string>
+    <string name="mgr_bssid_hidden">BSSID 已被系统隐藏（开启系统定位或授权 Shizuku/Root 后可显示）</string>
     <string name="app">应用</string>
     <string name="home">主页</string>
     <string name="toolbox">工具箱</string>

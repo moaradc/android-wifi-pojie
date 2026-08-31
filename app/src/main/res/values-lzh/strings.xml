@@ -197,7 +197,7 @@
     <string name="mgr_lbl_roaming">漫游</string>
     <string name="mgr_yes">然</string>
     <string name="mgr_no">否</string>
-    <string name="mgr_bssid_hidden">BSSID 為系統所隱（啟定位方可示之）</string>
+    <string name="mgr_bssid_hidden">BSSID 為系統所隱（啟定位或授 Shizuku/Root 之權方可示之）</string>
     <string name="app">此物</string>
     <string name="home">归处</string>
     <string name="toolbox">百宝箱</string>

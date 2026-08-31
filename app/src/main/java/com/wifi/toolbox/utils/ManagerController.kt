@@ -60,7 +60,7 @@ data class CurrentNetworkInfo(
     val connected: Boolean,
     val ssid: String,                   // WifiIdentity 三级解析（定位无关兜底）
     val netId: Int,                     // 当前连接的 networkId（定位关闭时经特权通道解析，不可得为 -1）
-    val bssid: String,                  // 受定位开关限制，可能为空
+    val bssid: String,                  // 定位关闭时经特权通道解析兜底；仍不可得为空/匿名占位
     val rssi: Int,                      // dBm，免定位
     val linkSpeedMbps: Int,             // 协商速率，免定位
     val frequencyMhz: Int,              // 免定位
@@ -250,7 +250,8 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
 
     // ---- 当前 WiFi 身份会话缓存（networkHandle 变化 = 新连接会话） ----
     var identitySsidState by remember { mutableStateOf("") }
-    var identityNetIdState by remember { mutableIntStateOf(-1) }
+    var identityNetIdState by remember { mutableStateOf(-1) }
+    var identityBssidState by remember { mutableStateOf("") }
     var identityHandleState by remember { mutableLongStateOf(0L) }
     var lastIdentityResolveAt by remember { mutableLongStateOf(0L) }
     var identityJob by remember { mutableStateOf<Job?>(null) }
@@ -302,6 +303,32 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
             )
         }
 
+    /**
+     * 已保存配置多通道读取：按 [channelOrder] 逐通道尝试，首个非空结果胜出
+     * （指定通道结果为空时静默降级补读其他通道——与扫描列表同一策略），
+     * 返回 (配置列表, 实际来源通道)；全通道为空返回 (空列表, 0)。
+     *
+     * Android 10+ 系统 API 通道恒为空（getConfiguredNetworks 对所有应用
+     * 返回空列表，官方限制与 targetSdk 无关），Root/Shizuku 通道可读；
+     * Android 9 及以下系统 API 通道有效。
+     */
+    @android.annotation.SuppressLint("MissingPermission")
+    fun fetchSavedConfigs(): Pair<List<WifiConfiguration>, Int> {
+        for (ch in channelOrder()) {
+            try {
+                val r: List<WifiConfiguration> = when (ch) {
+                    1 -> ShizukuUtil.getSavedWifiList()
+                    2 -> AidlServiceHelper.getSavedWifiList(app)
+                    3 -> ApiUtil.getSavedWifiList(context)
+                    else -> emptyList()
+                }
+                if (r.isNotEmpty()) return r to ch
+            } catch (_: Exception) {
+            }
+        }
+        return emptyList<WifiConfiguration>() to 0
+    }
+
     @android.annotation.SuppressLint("MissingPermission")
     fun performScan() {
         scanJob?.cancel()
@@ -310,14 +337,13 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
             scanErrorKeyState = 0
             try {
                 val triggerChannel = channelOrder().first()
-                // 已保存列表先行（合并标记用）
-                savedCache = try {
-                    when (triggerChannel) {
-                        1 -> ShizukuUtil.getSavedWifiList()
-                        2 -> AidlServiceHelper.getSavedWifiList(app)
-                        else -> emptyList()
-                    }
-                } catch (_: Exception) { emptyList() }
+                // 已保存配置先行（合并「已保存」标记与「忘记网络」按钮所需
+                // networkId 的数据源）。多通道回退读取（真机反馈：指定系统
+                // API 通道时扫描列表会静默降级到其他通道取数据，而已保存
+                // 配置却只读单通道——Android 10+ 系统 API 读配置恒为空，
+                // savedInfo 恒 null，导致「已保存」标签与已连接卡的
+                // 「忘记网络」按钮仅在 Shizuku 通道才出现）
+                savedCache = fetchSavedConfigs().first
 
                 if (!ApiUtil.isWifiEnabled(context)) {
                     scanErrorKeyState = 1
@@ -361,26 +387,9 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
     suspend fun performSavedNow(silent: Boolean) {
         if (!silent) savedLoadingState = true
         try {
-            val configs = mutableListOf<WifiConfiguration>()
-            var src = 0
-            for (ch in channelOrder()) {
-                try {
-                    val r: List<WifiConfiguration> = when (ch) {
-                        1 -> ShizukuUtil.getSavedWifiList()
-                        2 -> AidlServiceHelper.getSavedWifiList(app)
-                        3 -> ApiUtil.getSavedWifiList(context)
-                        else -> emptyList()
-                    }
-                    if (r.isNotEmpty()) {
-                        configs.addAll(r)
-                        src = ch
-                        break
-                    }
-                } catch (_: Exception) {
-                }
-            }
+            val (configs, src) = fetchSavedConfigs()
             savedSourceState = src
-            savedCache = configs.toList()
+            savedCache = configs
 
             // 破解成功记录（本地库，无任何权限要求）。
             // 直读 StateFlow.value：compose 状态首帧可能尚未传播首次发射，
@@ -642,24 +651,32 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
             info?.ssid?.removeSurrounding("\"")?.takeIf { it.isNotEmpty() && it !in badSsids } ?: ""
         } catch (_: Exception) { "" }
         val quickNetId = try { info?.networkId ?: -1 } catch (_: Exception) { -1 }
+        // 应用层 BSSID 直读：定位可用时即真实值；匿名化占位（定位关闭等
+        // 场景，02:00:00:00:00:00）视同不可得，经特权解析结果兜底
+        val quickBssidRaw = try { info?.bssid.orEmpty() } catch (_: Exception) { "" }
+        val quickBssid = if (quickBssidRaw.equals(ANONYMIZED_BSSID, ignoreCase = true)) ""
+        else quickBssidRaw
 
         if (!connected) {
             identitySsidState = ""
             identityNetIdState = -1
+            identityBssidState = ""
             identityHandleState = 0L
         } else if (handle != 0L && handle != identityHandleState) {
             // 新 WiFi 会话：清旧身份，异步经特权通道解析（定位关闭时唯一途径）
             identitySsidState = ""
             identityNetIdState = -1
+            identityBssidState = ""
             if (System.currentTimeMillis() - lastIdentityResolveAt > 3000) {
                 lastIdentityResolveAt = System.currentTimeMillis()
                 identityHandleState = handle
                 identityJob?.cancel()
                 identityJob = scope.launch {
-                    val (s, n) = WifiIdentity.resolve(context.applicationContext, app)
+                    val d = WifiIdentity.resolveDetail(context.applicationContext, app)
                     if (identityHandleState == handle) {
-                        identitySsidState = s
-                        identityNetIdState = n
+                        identitySsidState = d.ssid
+                        identityNetIdState = d.netId
+                        identityBssidState = d.bssid
                     }
                 }
             } else {
@@ -707,7 +724,9 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
             connected = connected,
             ssid = quickSsid.ifEmpty { if (cacheValid) identitySsidState else "" },
             netId = if (quickNetId >= 0) quickNetId else if (cacheValid) identityNetIdState else -1,
-            bssid = try { info?.bssid.orEmpty() } catch (_: Exception) { "" },
+            bssid = quickBssid
+                .ifEmpty { if (cacheValid) identityBssidState else "" }
+                .ifEmpty { quickBssidRaw },   // 特权亦不可得：保留占位值→UI 如实提示「已隐藏」
             rssi = try { info?.rssi ?: -200 } catch (_: Exception) { -200 },
             linkSpeedMbps = try { info?.linkSpeed ?: -1 } catch (_: Exception) { -1 },
             frequencyMhz = try { info?.frequency ?: 0 } catch (_: Exception) { 0 },

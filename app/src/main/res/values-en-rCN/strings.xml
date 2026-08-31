@@ -198,7 +198,7 @@
     <string name="mgr_lbl_roaming">Walk-net</string>
     <string name="mgr_yes">Yes</string>
     <string name="mgr_no">No</string>
-    <string name="mgr_bssid_hidden">BSSID hide by system (open place-find to see)</string>
+    <string name="mgr_bssid_hidden">BSSID hide by system (open place-find or allow Shizuku/Root to see)</string>
     <string name="app">app</string>
     <string name="home">home</string>
     <string name="toolbox">tools</string>

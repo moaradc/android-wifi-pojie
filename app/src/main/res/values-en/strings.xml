@@ -197,7 +197,7 @@
     <string name="mgr_lbl_roaming">Roaming</string>
     <string name="mgr_yes">Yes</string>
     <string name="mgr_no">No</string>
-    <string name="mgr_bssid_hidden">BSSID hidden by system (enable location to reveal)</string>
+    <string name="mgr_bssid_hidden">BSSID hidden by system (enable location or authorize Shizuku/Root to reveal)</string>
     <string name="app">App</string>
     <string name="home">Home</string>
     <string name="toolbox">Toolbox</string>
