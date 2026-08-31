@@ -229,6 +229,12 @@
     <string name="guard_cat_keepalive">Background keep-alive</string>
     <string name="guard_keepalive_wakelock">Wake lock</string>
     <string name="guard_keepalive_wakelock_tip">Keeps the process running in the background (some systems may still kill it)</string>
+    <string name="guard_keepalive_heartbeat">Heartbeat alarm watchdog</string>
+    <string name="guard_keepalive_heartbeat_tip">Wake lock is ignored in deep Doze; the alarm still wakes periodically for backup checks and restarts the service if killed (no privilege, on by default)</string>
+    <string name="guard_keepalive_heartbeat_interval">Heartbeat interval</string>
+    <string name="guard_heartbeat_interval_tip">Deep Doze limits alarms to about one per 9 minutes; shorter intervals are silently deferred (no error)</string>
+    <string name="guard_heartbeat_auto">Auto (follows check interval, 60 s minimum)</string>
+    <string name="guard_heartbeat_min_value">%1$d min</string>
     <string name="guard_keepalive_battery">Battery optimization exemption</string>
     <string name="guard_keepalive_battery_on">Exempted ✓ (system dialog to change)</string>
     <string name="guard_keepalive_battery_off">Not exempted — tap to request (doze freezes background)</string>

@@ -118,6 +118,21 @@ data class GuardSettings(
     val keepAliveWakeLock: Boolean = KEEP_ALIVE_WAKELOCK_DEFAULT,
 
     /**
+     * 后台保活——心跳闹钟看门狗（免特权，默认开启）：
+     * AlarmManager.setAndAllowWhileIdle 自续期一拍闹钟。唤醒锁在深度
+     * Doze 中被系统忽略，此闹钟照常触发（补失速检测）；进程被杀后闹钟
+     * 触发自动拉起服务。可关（关后仅剩前台服务+唤醒锁两层保活）。
+     */
+    val keepAliveHeartbeat: Boolean = KEEP_ALIVE_HEARTBEAT_DEFAULT,
+
+    /**
+     * 心跳间隔（秒）：0 = 自动（跟随检测间隔，最低 60 秒，与历史行为一致）；
+     * >0 = 固定值（仍受 60 秒硬下限约束，深度 Doze 中系统限流约 9 分钟
+     * 一拍、更短被静默推迟不报错）。预设见 HEARTBEAT_INTERVAL_PRESETS。
+     */
+    val heartbeatIntervalSec: Int = HEARTBEAT_INTERVAL_DEFAULT,
+
+    /**
      * 记录哪些类型的日志到实时日志（位掩码，默认全部）：
      * bit0 = INFO 正常（在线检测结果等）
      * bit1 = WARN 警告（跳过/豁免类事件）
@@ -185,6 +200,8 @@ data class GuardSettings(
         const val NOTIFY_ON_HEAL_FAIL_KEY = "guard_notify_on_heal_fail"
         const val SHOW_PERSISTENT_NOTIFICATION_KEY = "guard_show_persistent_notification"
         const val KEEP_ALIVE_WAKELOCK_KEY = "guard_keep_alive_wakelock"
+        const val KEEP_ALIVE_HEARTBEAT_KEY = "guard_keep_alive_heartbeat"
+        const val HEARTBEAT_INTERVAL_SEC_KEY = "guard_heartbeat_interval_sec"
         const val VERBOSE_LOG_KEY = "guard_verbose_log" // 旧版布尔开关（迁移源）
         const val LOG_LEVELS_KEY = "guard_log_levels"
         const val LOG_DIR_URI_KEY = "guard_log_dir_uri"
@@ -214,6 +231,10 @@ data class GuardSettings(
         const val SHOW_PERSISTENT_NOTIFICATION_DEFAULT = true
         /** 默认开启唤醒锁（用户诉求即“后台也要检测”；不想要可在设置关） */
         const val KEEP_ALIVE_WAKELOCK_DEFAULT = true
+        /** 默认开启心跳看门狗（与第十轮“默认配置即生效”行为一致，可关） */
+        const val KEEP_ALIVE_HEARTBEAT_DEFAULT = true
+        /** 心跳间隔默认自动（0：跟随检测间隔、60 秒下限，与历史行为一致） */
+        const val HEARTBEAT_INTERVAL_DEFAULT = 0
         const val VERBOSE_LOG_DEFAULT = true
         /** 默认记录全部类型（正常+警告+错误+自愈） */
         const val LOG_LEVELS_DEFAULT = 0b1111
@@ -246,6 +267,9 @@ data class GuardSettings(
 
         /** 检测预设时间间隔（秒） */
         val INTERVAL_PRESETS = listOf(10, 30, 60, 120, 300)
+
+        /** 心跳间隔预设（秒；0 = 自动跟随检测间隔） */
+        val HEARTBEAT_INTERVAL_PRESETS = listOf(0, 60, 120, 180, 300, 600, 900)
 
         fun from(prefs: SharedPreferences): GuardSettings {
             return GuardSettings(
@@ -292,6 +316,12 @@ data class GuardSettings(
                 keepAliveWakeLock = prefs.getBoolean(
                     KEEP_ALIVE_WAKELOCK_KEY, KEEP_ALIVE_WAKELOCK_DEFAULT
                 ),
+                keepAliveHeartbeat = prefs.getBoolean(
+                    KEEP_ALIVE_HEARTBEAT_KEY, KEEP_ALIVE_HEARTBEAT_DEFAULT
+                ),
+                heartbeatIntervalSec = prefs.getInt(
+                    HEARTBEAT_INTERVAL_SEC_KEY, HEARTBEAT_INTERVAL_DEFAULT
+                ).coerceIn(0, 3600),
                 // 迁移：旧版 verboseLog=false → 仅记录 异常+自愈；否则全部记录
                 logLevels = if (prefs.contains(LOG_LEVELS_KEY)) {
                     prefs.getInt(LOG_LEVELS_KEY, LOG_LEVELS_DEFAULT)

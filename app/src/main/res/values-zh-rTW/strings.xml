@@ -229,6 +229,12 @@
     <string name="guard_cat_keepalive">背景保活</string>
     <string name="guard_keepalive_wakelock">喚醒鎖</string>
     <string name="guard_keepalive_wakelock_tip">保持進程在後台運行（部分系統可能導致殺後台）</string>
+    <string name="guard_keepalive_heartbeat">心跳鬧鐘看門狗</string>
+    <string name="guard_keepalive_heartbeat_tip">深度休眠中喚醒鎖會被系統忽略，鬧鐘仍週期喚醒補偵測；程序被殺後自動拉起（免特權，預設開）</string>
+    <string name="guard_keepalive_heartbeat_interval">心跳間隔</string>
+    <string name="guard_heartbeat_interval_tip">深度休眠（Doze）下系統限流約 9 分鐘一次，更短會被靜默延後（不報錯）</string>
+    <string name="guard_heartbeat_auto">自動（跟隨偵測間隔，最低 60 秒）</string>
+    <string name="guard_heartbeat_min_value">%1$d 分鐘</string>
     <string name="guard_keepalive_battery">電池最佳化白名單</string>
     <string name="guard_keepalive_battery_on">已豁免 ✓（系統彈窗可修改）</string>
     <string name="guard_keepalive_battery_off">未豁免——點擊申請（休眠省電會凍結背景）</string>

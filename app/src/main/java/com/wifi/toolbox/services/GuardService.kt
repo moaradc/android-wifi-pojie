@@ -174,9 +174,10 @@ class GuardService : Service() {
             loopJob = scope.launch { guardLoop() }
         }
 
-        // 心跳闹钟自续期：所有存活路径（含 START_STICKY 重启/热加载）统一重排，
-        // 同一 PendingIntent 自动替换旧闹钟；用户停止走 onDestroy 取消
-        scheduleHeartbeat()
+        // 心跳闹钟自续期：开关开启时所有存活路径（含 START_STICKY 重启/热加载）
+        // 统一重排，同一 PendingIntent 自动替换旧闹钟；开关关闭则主动取消
+        // 残留闹钟（热加载关开关即停，不留“幽灵闹钟”）；用户停止走 onDestroy 取消
+        if (settings.keepAliveHeartbeat) scheduleHeartbeat() else cancelHeartbeat()
         return START_STICKY
     }
 
@@ -207,10 +208,16 @@ class GuardService : Service() {
      *
      * 下限 60s 兼顾电池（正常态主循环自己跑，心跳仅作失速看门狗，
      * 触发时检测新鲜则只重排闹钟不检测）；非精确闹钟允许系统合并唤醒。
+     * 开关与间隔可在设置页「后台保活」分组调整（默认开/自动，效果与
+     * 默认配置即生效一致）。
      */
     private fun scheduleHeartbeat() {
         val am = getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        val intervalSec = maxOf(settings.checkIntervalSec, HEARTBEAT_MIN_SEC)
+        // 0 = 自动：跟随检测间隔（与历史默认行为一致）；>0 = 用户自定义固定值；
+        // 均受 60 秒硬下限约束（更短在深度 Doze 中无意义且纯耗电）
+        val baseSec = if (settings.heartbeatIntervalSec > 0) settings.heartbeatIntervalSec
+                      else settings.checkIntervalSec
+        val intervalSec = maxOf(baseSec, HEARTBEAT_MIN_SEC)
         val at = System.currentTimeMillis() + intervalSec * 1000L
         val pi = heartbeatPendingIntent()
         try {

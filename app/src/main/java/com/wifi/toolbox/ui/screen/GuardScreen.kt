@@ -1465,6 +1465,70 @@ private fun GuardSettingsPage(settings: MutableState<GuardSettings>, app: Toolbo
                 )
             }
             item {
+                // 心跳闹钟看门狗开关（免特权兜底，默认开=与历史默认行为一致）
+                SwitchPreference(
+                    value = s.keepAliveHeartbeat,
+                    onValueChange = {
+                        settings.value = s.copy(keepAliveHeartbeat = it)
+                        // 服务运行中：热加载即时重排/取消闹钟；未运行：下次启动生效
+                        if (GuardState.running) {
+                            try {
+                                context.startService(
+                                    Intent(context, GuardService::class.java).apply {
+                                        action = GuardService.ACTION_RELOAD
+                                    }
+                                )
+                            } catch (_: Exception) {
+                            }
+                        }
+                    },
+                    title = { Text(stringResource(R.string.guard_keepalive_heartbeat)) },
+                    summary = { Text(stringResource(R.string.guard_keepalive_heartbeat_tip)) },
+                    icon = { Icon(Icons.Filled.Alarm, null) }
+                )
+            }
+            if (s.keepAliveHeartbeat) {
+                item {
+                    // 心跳间隔：0=自动（跟随检测间隔、60 秒下限）；预设 1~15 分钟。
+                    // Doze 中系统限流约 9 分钟一拍，更短会被静默推迟（不报错）
+                    val hbPresets = GuardSettings.HEARTBEAT_INTERVAL_PRESETS
+                    val hbLabels = hbPresets.map { sec ->
+                        when {
+                            sec == 0 -> context.getString(R.string.guard_heartbeat_auto)
+                            sec >= 120 -> context.getString(
+                                R.string.guard_heartbeat_min_value, sec / 60
+                            )
+                            else -> context.getString(R.string.guard_interval_value, sec)
+                        }
+                    }
+                    val hbIndex = hbPresets.indexOf(s.heartbeatIntervalSec)
+                    ListPreference(
+                        value = if (hbIndex >= 0) hbIndex else 0,
+                        onValueChange = { index ->
+                            if (index in hbPresets.indices) {
+                                // setter 自带热加载：服务运行中 ACTION_RELOAD 会按新间隔重排闹钟
+                                settings.value = s.copy(
+                                    heartbeatIntervalSec = hbPresets[index]
+                                )
+                            }
+                        },
+                        title = { Text(stringResource(R.string.guard_keepalive_heartbeat_interval)) },
+                        summary = {
+                            Text(
+                                if (hbIndex >= 0) hbLabels[hbIndex]
+                                else context.getString(
+                                    R.string.guard_interval_value, s.heartbeatIntervalSec
+                                )
+                            )
+                        },
+                        icon = { Icon(Icons.Filled.Schedule, null) },
+                        values = hbPresets.indices.toList(),
+                        valueToText = { i: Int -> AnnotatedString(hbLabels[i]) },
+                        type = ListPreferenceType.DROPDOWN_MENU
+                    )
+                }
+            }
+            item {
                 // 系统级：电池优化白名单（回前台时自动刷新状态）
                 val batteryOk = remember { mutableStateOf(false) }
                 LaunchedEffect(Unit) { batteryOk.value = KeepAliveHelper.isIgnoringBatteryOptimizations(context) }

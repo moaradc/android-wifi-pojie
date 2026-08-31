@@ -48,6 +48,8 @@ fun rememberGuardSettings(context: Context): MutableState<GuardSettings> {
                         putInt(GuardSettings.AUTO_CLEAN_DAYS_KEY, s.autoCleanDays)
                         putBoolean(GuardSettings.AUTO_SAVE_LOG_KEY, s.autoSaveLog)
                         putBoolean(GuardSettings.KEEP_ALIVE_WAKELOCK_KEY, s.keepAliveWakeLock)
+                        putBoolean(GuardSettings.KEEP_ALIVE_HEARTBEAT_KEY, s.keepAliveHeartbeat)
+                        putInt(GuardSettings.HEARTBEAT_INTERVAL_SEC_KEY, s.heartbeatIntervalSec)
                         putInt(GuardSettings.HEAL_CHANNEL_KEY, s.healChannel)
                         putBoolean(GuardSettings.START_ON_BOOT_KEY, s.startOnBoot)
                     }
