@@ -271,7 +271,16 @@
 
     <string name="guard_cat_probe">检测方式</string>
     <string name="guard_probe_http">HTTP 204 探测</string>
-    <string name="guard_probe_http_tip">AOSP 标准探测，双端点互备，最推荐</string>
+    <string name="guard_probe_http_tip">AOSP 标准探测，端点可自选，任一返回 204 即在线</string>
+    <string name="guard_http_endpoint">HTTP 探测端点</string>
+    <string name="guard_http_endpoint_0">智能（按设备厂商自动）</string>
+    <string name="guard_http_endpoint_1">小米</string>
+    <string name="guard_http_endpoint_2">华为</string>
+    <string name="guard_http_endpoint_3">vivo</string>
+    <string name="guard_http_endpoint_4">OPPO</string>
+    <string name="guard_http_endpoint_5">高通</string>
+    <string name="guard_http_endpoint_6">Google 国际</string>
+    <string name="guard_http_endpoint_7">Cloudflare</string>
     <string name="guard_probe_dns">DNS 解析探测</string>
     <string name="guard_probe_dns_tip">揪出 DNS 劫持/黑洞（204 通但解析失败时有效）</string>
     <string name="guard_probe_icmp">ICMP ping 探测</string>

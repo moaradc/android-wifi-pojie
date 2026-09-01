@@ -1089,6 +1089,35 @@ private fun GuardSettingsPage(settings: MutableState<GuardSettings>, app: Toolbo
                     icon = { Icon(Icons.Filled.Language, null) }
                 )
             }
+            // HTTP 204 探测端点预设（仅 HTTP 策略启用时显示；
+            // 智能档按设备厂商自动匹配，每档含备用端点任一 204 即在线）
+            if (probeHttp) {
+                item {
+                    val endpointValues = listOf(
+                        stringResource(R.string.guard_http_endpoint_0),
+                        stringResource(R.string.guard_http_endpoint_1),
+                        stringResource(R.string.guard_http_endpoint_2),
+                        stringResource(R.string.guard_http_endpoint_3),
+                        stringResource(R.string.guard_http_endpoint_4),
+                        stringResource(R.string.guard_http_endpoint_5),
+                        stringResource(R.string.guard_http_endpoint_6),
+                        stringResource(R.string.guard_http_endpoint_7)
+                    )
+                    val endpointIdx = s.httpEndpoint.coerceIn(0, endpointValues.size - 1)
+                    ListPreference(
+                        value = endpointIdx,
+                        onValueChange = { i ->
+                            settings.value = s.copy(httpEndpoint = i)
+                        },
+                        title = { Text(stringResource(R.string.guard_http_endpoint)) },
+                        summary = { Text(endpointValues[endpointIdx]) },
+                        icon = { Icon(Icons.Filled.Cloud, null) },
+                        values = endpointValues.indices.toList(),
+                        valueToText = { i: Int -> AnnotatedString(endpointValues[i]) },
+                        type = ListPreferenceType.DROPDOWN_MENU
+                    )
+                }
+            }
             item {
                 CheckboxPreference(
                     value = probeDns,

@@ -28,6 +28,7 @@ fun rememberGuardSettings(context: Context): MutableState<GuardSettings> {
                     prefs.edit {
                         putInt(GuardSettings.PROBE_MODES_KEY, s.probeModes)
                         putInt(GuardSettings.PROBE_TIMEOUT_MS_KEY, s.probeTimeoutMs)
+                        putInt(GuardSettings.HTTP_ENDPOINT_KEY, s.httpEndpoint)
                         putInt(GuardSettings.FAIL_THRESHOLD_KEY, s.failThreshold)
                         putInt(GuardSettings.CHECK_INTERVAL_SEC_KEY, s.checkIntervalSec)
                         putInt(GuardSettings.SUSPECT_INTERVAL_SEC_KEY, s.suspectIntervalSec)

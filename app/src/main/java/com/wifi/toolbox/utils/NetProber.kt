@@ -4,16 +4,22 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
+import android.os.Build
 import com.wifi.toolbox.structs.GuardSettings
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import java.net.HttpURLConnection
 import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.URL
+import java.util.Locale
 
 /**
  * 单次探测结果
@@ -42,18 +48,60 @@ data class ProbeVerdict(
  * 即使系统默认路由已回落到蜂窝，探测也只会走 WiFi，杜绝"误判为在线"。
  *
  * 四种可插拔策略（[GuardSettings.probeModes] 位掩码组合）：
- * - HTTP 204   AOSP 标准探测（与系统 NetworkMonitor 同源），双端点互备
+ * - HTTP 204   AOSP 标准探测（与系统 NetworkMonitor 同源），端点可自选预设
+ *   （[GuardSettings.httpEndpoint]，任一端点返回 204 即在线、任一成功即刻返回）
  * - DNS        检测运营商 DNS 黑洞/劫持（204 通但 DNS 死的疑难场景）
  * - ICMP       特权 shell ping（源 IP 绑定 WiFi 接口，应用层全挂时的仲裁手段）
  * - VALIDATED  系统 NET_CAPABILITY_VALIDATED 能力位（最近一次系统验证结论，零开销）
  */
 object NetProber {
 
-    // 与 AOSP NetworkMonitor 一致的标准探测端点；互为异构备份
-    private val HTTP_204_ENDPOINTS = listOf(
-        "http://connectivitycheck.gstatic.com/generate_204",
-        "http://www.qualcomm.cn/generate_204"
-    )
+    // HTTP 204 探测端点（国内厂商端点经联网考证 + 连通性验证 2026-09，
+    // 阿里云香港点位每端点 3 次）：小米/华为/vivo/高通/Google/Cloudflare
+    // 均 204 稳定；OPPO 现行域名为 conn2.oppomobile.com（旧 conn.oppomobile.com
+    // 已全球 DNS 失效 NXDOMAIN）；魅族 conn.flyme.cn 返回 403 不收录；
+    // www.google.cn 解析到 Google 全球 IP 境内大概率不通不收录；
+    // Cloudflare cp 境内可达性一般，仅作境外档备用端点。
+    private const val EP_MIUI = "http://connect.rom.miui.com/generate_204"
+    private const val EP_HUAWEI = "http://connectivitycheck.platform.hicloud.com/generate_204"
+    private const val EP_VIVO = "http://wifi.vivo.com.cn/generate_204"
+    private const val EP_OPPO = "http://conn2.oppomobile.com/generate_204"
+    private const val EP_QUALCOMM = "http://www.qualcomm.cn/generate_204"
+    private const val EP_GSTATIC = "http://connectivitycheck.gstatic.com/generate_204"
+    private const val EP_CLOUDFLARE = "http://cp.cloudflare.com/generate_204"
+
+    // HTTP 探测任务常驻 scope（fire-and-forget）：任一端点成功后弃置仍在途的
+    // 被墙端点（由其自身超时收尾），本轮探测即刻返回，不再等最慢端点超时
+    private val httpProbeScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /**
+     * HTTP 204 探测端点预设（与 [GuardSettings.httpEndpoint] 档位一一对应），
+     * 每档含主端点 + 备用端点，任一返回 204 即在线。
+     */
+    fun httpEndpoints(preset: Int): List<String> = when (preset) {
+        1 -> listOf(EP_MIUI, EP_QUALCOMM)
+        2 -> listOf(EP_HUAWEI, EP_QUALCOMM)
+        3 -> listOf(EP_VIVO, EP_QUALCOMM)
+        4 -> listOf(EP_OPPO, EP_QUALCOMM)
+        5 -> listOf(EP_QUALCOMM, EP_MIUI)
+        6 -> listOf(EP_GSTATIC, EP_CLOUDFLARE)
+        7 -> listOf(EP_CLOUDFLARE, EP_QUALCOMM)
+        else -> autoHttpEndpoints()
+    }
+
+    /** 智能档（默认）：按设备厂商匹配国内端点（境外同样可达），未匹配回退 高通+Google */
+    private fun autoHttpEndpoints(): List<String> {
+        val m = Build.MANUFACTURER.lowercase(Locale.US)
+        val vendor = when {
+            m.contains("xiaomi") || m.contains("redmi") -> EP_MIUI
+            m.contains("huawei") || m.contains("honor") -> EP_HUAWEI
+            m.contains("vivo") || m.contains("iqoo") -> EP_VIVO
+            m.contains("oppo") || m.contains("oneplus") || m.contains("realme") -> EP_OPPO
+            else -> null
+        }
+        return if (vendor != null) listOf(vendor, EP_QUALCOMM)
+        else listOf(EP_QUALCOMM, EP_GSTATIC)
+    }
 
     // DNS 探测域名：境外公共域 + 境内可解析域，避免单点故障误判
     private val DNS_TARGETS = listOf("www.google.com", "www.baidu.com")
@@ -83,18 +131,18 @@ object NetProber {
         if (modes and GuardSettings.PROBE_HTTP_204 != 0) {
             jobs += async {
                 withTimeoutOrNull(settings.probeTimeoutMs.toLong() + 1000) {
-                    // 双端点任一 204 即在线（互备设计本意，与 KDoc 声明一致）。
-                    // 旧实现 .first() 只取列表首位（gstatic 端点）结果，备用
-                    // 端点（qualcomm.cn）的成功被直接丢弃——境内 gstatic 被
-                    // TCP 黑洞时网络完全正常 HTTP 仍报 SocketTimeoutException，
-                    // 仅靠 ICMP/其他策略兜底才不误判断网。现改为：
-                    // 任一成功优先；全失败时优先暴露 Portal 特征（302/200+body，
-                    // 对 Portal 判定与日志诊断更有价值）；两者皆无取首个失败
-                    // 明细（保持 gstatic 超时类报错可见，便于定位）。
-                    val rs = probeHttp204(wifiNetwork, settings.probeTimeoutMs)
+                    // 端点由预设决定（settings.httpEndpoint），任一返回 204 即在线
+                    //（互备取值，第十六轮修复 .first() 只取首端点的 bug）；
+                    // 全失败时优先暴露 Portal 特征（302/200+body，对 Portal
+                    // 判定与日志诊断更有价值）；两者皆无取首个失败明细。
+                    val rs = probeHttp204(
+                        wifiNetwork, settings.probeTimeoutMs,
+                        httpEndpoints(settings.httpEndpoint)
+                    )
                     rs.firstOrNull { it.ok }
                         ?: rs.firstOrNull { it.isPortal }
-                        ?: rs.first()
+                        ?: rs.firstOrNull()
+                        ?: ProbeResult("HTTP", false, "timeout")
                 } ?: ProbeResult("HTTP", false, "timeout")
             }
         }
@@ -138,45 +186,79 @@ object NetProber {
     }
 
     /**
-     * HTTP 204 探测：并行打双端点，任一返回 204 即在线。
+     * HTTP 204 探测：并行探测预设端点列表，任一返回 204 即在线。
      * 额外识别两类 Portal 特征：302 重定向（跳认证页）、200 + body（推送页）。
+     *
+     * 任一端点成功即刻返回（fire-and-forget 弃置仍在途的被墙端点，由其自身
+     * 超时收尾）——旧实现 awaitAll 等最慢端点，境内被墙的 gstatic 会把每轮
+     * HTTP 探测拖满超时；全失败时收齐全部结果以暴露 Portal 特征。
      */
     private suspend fun probeHttp204(
         wifiNetwork: Network?,
-        timeoutMs: Int
+        timeoutMs: Int,
+        endpoints: List<String>
     ): List<ProbeResult> = coroutineScope {
-        val jobs = HTTP_204_ENDPOINTS.map { url ->
-            async(Dispatchers.IO) {
-                val start = System.currentTimeMillis()
-                var conn: HttpURLConnection? = null
-                try {
-                    // 关键：绑定 WiFi 网络发起请求，防蜂窝回落误判
-                    conn = if (wifiNetwork != null) {
-                        wifiNetwork.openConnection(URL(url)) as HttpURLConnection
-                    } else {
-                        URL(url).openConnection() as HttpURLConnection
-                    }
-                    conn.connectTimeout = timeoutMs
-                    conn.readTimeout = timeoutMs
-                    conn.instanceFollowRedirects = false
-                    conn.useCaches = false
-                    val code = conn.responseCode
-                    val cost = System.currentTimeMillis() - start
-                    when {
-                        code == 204 -> ProbeResult("HTTP", true, "$code ${cost}ms")
-                        code in 300..399 -> ProbeResult(
-                            "HTTP", false, "$code ${cost}ms", isPortal = true
-                        )
-                        else -> ProbeResult("HTTP", false, "$code ${cost}ms")
-                    }
-                } catch (e: Exception) {
-                    ProbeResult("HTTP", false, e.javaClass.simpleName)
-                } finally {
-                    conn?.disconnect()
-                }
+        if (endpoints.isEmpty()) return@coroutineScope emptyList()
+        val channel = Channel<ProbeResult>(Channel.UNLIMITED)
+        // 探测任务挂在常驻 scope（非本协程子级）：任一成功后无需等其余端点完成
+        endpoints.forEach { url ->
+            httpProbeScope.launch {
+                channel.send(probeOne204(url, wifiNetwork, timeoutMs))
             }
         }
-        jobs.awaitAll()
+        val results = mutableListOf<ProbeResult>()
+        while (results.size < endpoints.size && results.none { it.ok }) {
+            results += channel.receive()
+        }
+        results
+    }
+
+    /** 单端点探测一次；detail 带端点短名（日志可定位是哪个端点应答） */
+    private fun probeOne204(
+        url: String,
+        wifiNetwork: Network?,
+        timeoutMs: Int
+    ): ProbeResult {
+        val label = hostLabel(url)
+        val start = System.currentTimeMillis()
+        var conn: HttpURLConnection? = null
+        return try {
+            // 关键：绑定 WiFi 网络发起请求，防蜂窝回落误判
+            conn = if (wifiNetwork != null) {
+                wifiNetwork.openConnection(URL(url)) as HttpURLConnection
+            } else {
+                URL(url).openConnection() as HttpURLConnection
+            }
+            conn.connectTimeout = timeoutMs
+            conn.readTimeout = timeoutMs
+            conn.instanceFollowRedirects = false
+            conn.useCaches = false
+            val code = conn.responseCode
+            val cost = System.currentTimeMillis() - start
+            when {
+                code == 204 -> ProbeResult("HTTP", true, "$label $code ${cost}ms")
+                code in 300..399 -> ProbeResult(
+                    "HTTP", false, "$label $code ${cost}ms", isPortal = true
+                )
+                else -> ProbeResult("HTTP", false, "$label $code ${cost}ms")
+            }
+        } catch (e: Exception) {
+            ProbeResult("HTTP", false, "$label ${e.javaClass.simpleName}")
+        } finally {
+            conn?.disconnect()
+        }
+    }
+
+    /** 端点短名（日志/事件里标识是哪个端点应答） */
+    private fun hostLabel(url: String): String = when {
+        url.contains("miui.com") -> "miui"
+        url.contains("hicloud.com") -> "hicloud"
+        url.contains("vivo.com") -> "vivo"
+        url.contains("oppomobile.com") -> "oppo"
+        url.contains("qualcomm.cn") -> "qualcomm"
+        url.contains("gstatic.com") -> "gstatic"
+        url.contains("cloudflare.com") -> "cloudflare"
+        else -> "http"
     }
 
     /**
