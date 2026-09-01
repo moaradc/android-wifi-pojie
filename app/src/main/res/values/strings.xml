@@ -715,4 +715,19 @@
     <string name="unsupported_file_format">不支持的文件格式</string>
     <string name="import_failed">导入失败</string>
     <string name="parse_failed">解析失败</string>
+
+    <string name="storage_space">存储空间</string>
+    <string name="storage_clean">清理存储空间</string>
+    <string name="storage_clean_summary">缓存、日志、历史等共占用 %1$s</string>
+    <string name="storage_category_cache">缓存文件</string>
+    <string name="storage_category_cache_tip">分享导出的临时文件，可安全清理</string>
+    <string name="storage_category_log">守护日志</string>
+    <string name="storage_category_log_tip">应用私有目录内自动与手动保存的日志</string>
+    <string name="storage_category_history">破解历史</string>
+    <string name="storage_category_history_tip">含已破解成功的密码，清理后无法恢复</string>
+    <string name="storage_category_res">自定义破解资源</string>
+    <string name="storage_category_res_tip">覆写的内置资源将恢复原版，自建资源将被删除</string>
+    <string name="storage_clean_selected">清理所选</string>
+    <string name="storage_clean_done">已清理 %1$s</string>
+    <string name="storage_nothing">没有可清理的内容</string>
 </resources>

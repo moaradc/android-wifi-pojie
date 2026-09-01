@@ -706,4 +706,19 @@
     <string name="unsupported_file_format">Unsupported format</string>
     <string name="import_failed">Import failed</string>
     <string name="parse_failed">Parse failed</string>
+
+    <string name="storage_space">Storage</string>
+    <string name="storage_clean">Clear storage</string>
+    <string name="storage_clean_summary">Cache, logs and history take %1$s</string>
+    <string name="storage_category_cache">Cache files</string>
+    <string name="storage_category_cache_tip">Temporary files from sharing and export, safe to clear</string>
+    <string name="storage_category_log">Guard logs</string>
+    <string name="storage_category_log_tip">Auto and manually saved logs in app-private storage</string>
+    <string name="storage_category_history">Pojie history</string>
+    <string name="storage_category_history_tip">Contains cracked passwords, cannot be recovered after clearing</string>
+    <string name="storage_category_res">Custom resources</string>
+    <string name="storage_category_res_tip">Overridden built-ins revert to original; custom ones are deleted</string>
+    <string name="storage_clean_selected">Clear selected</string>
+    <string name="storage_clean_done">Freed %1$s</string>
+    <string name="storage_nothing">Nothing to clear</string>
 </resources>

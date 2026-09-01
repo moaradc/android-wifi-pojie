@@ -706,4 +706,19 @@
     <string name="unsupported_file_format">此卷宗非我门派所识</string>
     <string name="import_failed">纳入未果</string>
     <string name="parse_failed">参悟不透</string>
+
+    <string name="storage_space">府库</string>
+    <string name="storage_clean">清扫府库</string>
+    <string name="storage_clean_summary">可扫之杂物凡 %1$s</string>
+    <string name="storage_category_cache">暂存之物</string>
+    <string name="storage_category_cache_tip">传抄递送所遗，扫之无碍</string>
+    <string name="storage_category_log">守护札记</string>
+    <string name="storage_category_log_tip">皆存本门私册之内</string>
+    <string name="storage_category_history">破译簿册</string>
+    <string name="storage_category_history_tip">所破之密码尽录于斯，扫则不可复得</string>
+    <string name="storage_category_res">自撰法门</string>
+    <string name="storage_category_res_tip">覆写者复原旧貌，自撰者散佚无踪</string>
+    <string name="storage_clean_selected">依选而扫</string>
+    <string name="storage_clean_done">已扫 %1$s</string>
+    <string name="storage_nothing">府库洁净，无可扫者</string>
 </resources>

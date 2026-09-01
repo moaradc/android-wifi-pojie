@@ -4,6 +4,7 @@ import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -13,14 +14,19 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Api
 import androidx.compose.material.icons.filled.Brightness4
+import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.FormatColorFill
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.outlined.ColorLens
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -31,11 +37,15 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -48,6 +58,10 @@ import com.topjohnwu.superuser.Shell
 import com.wifi.toolbox.R
 import com.wifi.toolbox.ToolboxApp
 import com.wifi.toolbox.utils.LocaleConfigs
+import com.wifi.toolbox.utils.StorageCleaner
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import me.zhanghai.compose.preference.ListPreference
 import me.zhanghai.compose.preference.ListPreferenceType
 import me.zhanghai.compose.preference.Preference
@@ -249,6 +263,130 @@ fun SettingsScreen(
                         icon = { Icon(painterResource(R.drawable.ic_root), null) }
                     )
 
+                    // ---- 存储空间 ----
+                    PreferenceCategory(title = { Text(stringResource(R.string.storage_space)) })
+
+                    var showStorageDialog by remember { mutableStateOf(false) }
+                    var storageInfo by remember { mutableStateOf<StorageCleaner.Info?>(null) }
+                    var scanTick by remember { mutableStateOf(0) }
+                    var selCache by remember { mutableStateOf(true) }
+                    var selLog by remember { mutableStateOf(false) }
+                    var selHistory by remember { mutableStateOf(false) }
+                    var selRes by remember { mutableStateOf(false) }
+                    val storageScope = rememberCoroutineScope()
+
+                    // 进入设置页与每次清理完成后重扫（目录都很小，开销可忽略）
+                    LaunchedEffect(scanTick) {
+                        storageInfo = withContext(Dispatchers.IO) { StorageCleaner.scan(context) }
+                    }
+
+                    Preference(
+                        title = { Text(stringResource(R.string.storage_clean)) },
+                        icon = { Icon(Icons.Filled.DeleteSweep, null) },
+                        summary = {
+                            Text(
+                                stringResource(
+                                    R.string.storage_clean_summary,
+                                    StorageCleaner.formatSize(storageInfo?.total ?: 0L)
+                                )
+                            )
+                        },
+                        onClick = {
+                            // 默认仅勾选缓存（唯一可安全清理项），其余按需手动勾选
+                            selCache = true
+                            selLog = false
+                            selHistory = false
+                            selRes = false
+                            showStorageDialog = true
+                        }
+                    )
+
+                    SuperDialog(
+                        title = stringResource(R.string.storage_clean),
+                        show = mutableStateOf(showStorageDialog),
+                        onDismissRequest = { showStorageDialog = false }
+                    ) {
+                        val info = storageInfo
+                        if (info == null) {
+                            // 扫描进行中：弹窗内容暂空，扫描完成后自动填充
+                        } else if (info.total == 0L) {
+                            Text(stringResource(R.string.storage_nothing))
+                        } else {
+                            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                                StorageCleanRow(
+                                    checked = selCache,
+                                    onCheckedChange = { selCache = it },
+                                    title = stringResource(R.string.storage_category_cache),
+                                    size = StorageCleaner.formatSize(info.cacheBytes),
+                                    tip = stringResource(R.string.storage_category_cache_tip)
+                                )
+                                StorageCleanRow(
+                                    checked = selLog,
+                                    onCheckedChange = { selLog = it },
+                                    title = stringResource(R.string.storage_category_log),
+                                    size = StorageCleaner.formatSize(info.logBytes),
+                                    tip = stringResource(R.string.storage_category_log_tip)
+                                )
+                                StorageCleanRow(
+                                    checked = selHistory,
+                                    onCheckedChange = { selHistory = it },
+                                    title = stringResource(R.string.storage_category_history),
+                                    size = StorageCleaner.formatSize(info.historyBytes),
+                                    tip = stringResource(R.string.storage_category_history_tip)
+                                )
+                                StorageCleanRow(
+                                    checked = selRes,
+                                    onCheckedChange = { selRes = it },
+                                    title = stringResource(R.string.storage_category_res),
+                                    size = StorageCleaner.formatSize(info.resBytes),
+                                    tip = stringResource(R.string.storage_category_res_tip)
+                                )
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    TextButton(
+                                        modifier = Modifier.weight(1f),
+                                        text = stringResource(R.string.btn_cancel),
+                                        onClick = { showStorageDialog = false }
+                                    )
+                                    TextButton(
+                                        modifier = Modifier.weight(1f),
+                                        text = stringResource(R.string.storage_clean_selected),
+                                        enabled = selCache || selLog || selHistory || selRes,
+                                        colors = ButtonDefaults.textButtonColorsPrimary(),
+                                        onClick = {
+                                            showStorageDialog = false
+                                            val doCache = selCache
+                                            val doLog = selLog
+                                            val doHistory = selHistory
+                                            val doRes = selRes
+                                            val historyBytes = info.historyBytes
+                                            storageScope.launch {
+                                                val freed = withContext(Dispatchers.IO) {
+                                                    StorageCleaner.clean(context, doCache, doLog, doRes) +
+                                                            (if (doHistory) historyBytes else 0L)
+                                                }
+                                                // 破解历史走 Room DAO 路径：Flow 自动刷新 + VACUUM 回收文件空间
+                                                if (doHistory) app.pojieHistory.clearAll()
+                                                if (freed > 0) {
+                                                    app.ui.snackbar(
+                                                        context.getString(
+                                                            R.string.storage_clean_done,
+                                                            StorageCleaner.formatSize(freed)
+                                                        )
+                                                    )
+                                                }
+                                                scanTick++
+                                            }
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     PreferenceCategory(title = { Text(stringResource(R.string.language_settings)) })
 
                     ListPreference(
@@ -318,3 +456,46 @@ fun checkSuExists(): Boolean {
 }
 
 fun Color.toHexString(): String = String.format("#%08X", this.toArgb())
+
+/**
+ * 「清理存储空间」弹窗内的单行条目：勾选框 + 标题 + 占用大小 + 说明。
+ * 整行可点按切换勾选（与主流应用清理页的交互一致）。
+ */
+@Composable
+private fun StorageCleanRow(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    title: String,
+    size: String,
+    tip: String
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable { onCheckedChange(!checked) }
+            .padding(horizontal = 4.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Checkbox(checked = checked, onCheckedChange = onCheckedChange)
+        Column(modifier = Modifier.weight(1f)) {
+            Row(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = size,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Text(
+                text = tip,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}

@@ -93,6 +93,12 @@ interface PojieDao {
 
     @Query("DELETE FROM history_metadata WHERE ssid = :ssid")
     suspend fun deleteHistory(ssid: String)
+
+    @Query("DELETE FROM password_items")
+    suspend fun deleteAllPasswords()
+
+    @Query("DELETE FROM history_metadata")
+    suspend fun deleteAllHistory()
 }
 
 // --- Database ---
@@ -120,7 +126,8 @@ abstract class AppDatabase : RoomDatabase() {
 // --- Manager ---
 
 class PojieHistoryManager(context: Context) {
-    private val dao = AppDatabase.getInstance(context).pojieDao()
+    private val db = AppDatabase.getInstance(context)
+    private val dao = db.pojieDao()
     private val scope = CoroutineScope(Dispatchers.IO)
 
     val historyFlow: StateFlow<List<PojieHistoryItem>> = dao.getAllHistoryFlow()
@@ -155,6 +162,28 @@ class PojieHistoryManager(context: Context) {
     fun deleteHistory(ssid: String) {
         scope.launch {
             dao.deleteHistory(ssid)
+        }
+    }
+
+    /**
+     * 清空全部破解历史（含已破解成功的密码记录），供总设置「清理存储空间」使用。
+     *
+     * - 走 DAO @Query 删除（非裸 execSQL）：Room 失效追踪器才会通知，
+     *   所有页面的 historyFlow 自动刷新为空列表
+     * - 删除后执行 VACUUM 真正回收 db 文件占用的磁盘空间
+     *   （SQLite DELETE 不缩小文件，仅标记页空闲；VACUUM 不能在事务内执行，
+     *   故放在两个 DAO 事务之后单独跑）
+     * - 字节数统计由调用方（StorageCleaner）在清理前自行完成
+     */
+    fun clearAll() {
+        scope.launch {
+            try {
+                dao.deleteAllPasswords()
+                dao.deleteAllHistory()
+                db.openHelper.writableDatabase.execSQL("VACUUM")
+            } catch (_: Exception) {
+                // 清理失败不影响功能：Flow 已由 DAO 删除刷新，最坏残留数据
+            }
         }
     }
 }

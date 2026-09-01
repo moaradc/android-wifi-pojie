@@ -707,4 +707,19 @@
     <string name="unsupported_file_format">no support file way</string>
     <string name="import_failed">import fail</string>
     <string name="parse_failed">parse fail</string>
+
+    <string name="storage_space">Store place</string>
+    <string name="storage_clean">Clear the storage</string>
+    <string name="storage_clean_summary">All the thing use %1$s</string>
+    <string name="storage_category_cache">Cache file</string>
+    <string name="storage_category_cache_tip">Temp file for share, clean is safe</string>
+    <string name="storage_category_log">Guard log</string>
+    <string name="storage_category_log_tip">Log all save in app own place</string>
+    <string name="storage_category_history">Pojie history</string>
+    <string name="storage_category_history_tip">Password inside, clean then no come back</string>
+    <string name="storage_category_res">Self make resource</string>
+    <string name="storage_category_res_tip">Cover write go back old, self make will gone</string>
+    <string name="storage_clean_selected">Clear the choose</string>
+    <string name="storage_clean_done">Clean %1$s already</string>
+    <string name="storage_nothing">No thing can clean</string>
 </resources>
