@@ -268,9 +268,8 @@
     <string name="guard_notif_heal_fail_text">%1$s 重連後仍無法上網，將按退避策略繼續嘗試</string>
     <string name="guard_cat_probe">檢測方式</string>
     <string name="guard_probe_http">HTTP 204 探測</string>
-    <string name="guard_probe_http_tip">AOSP 標準探測，端點可自擇，任一得 204 即在綫</string>
+    <string name="guard_probe_http_tip">AOSP 標準探測，探測所選端點，得 204 即在綫</string>
     <string name="guard_http_endpoint">HTTP 探測端點</string>
-    <string name="guard_http_endpoint_0">智（循廠商）</string>
     <string name="guard_http_endpoint_1">小米</string>
     <string name="guard_http_endpoint_2">華為</string>
     <string name="guard_http_endpoint_3">vivo</string>

@@ -271,9 +271,8 @@
 
     <string name="guard_cat_probe">检测方式</string>
     <string name="guard_probe_http">HTTP 204 探测</string>
-    <string name="guard_probe_http_tip">AOSP 标准探测，端点可自选，任一返回 204 即在线</string>
+    <string name="guard_probe_http_tip">AOSP 标准探测，探测所选端点，返回 204 即在线</string>
     <string name="guard_http_endpoint">HTTP 探测端点</string>
-    <string name="guard_http_endpoint_0">智能（按设备厂商自动）</string>
     <string name="guard_http_endpoint_1">小米</string>
     <string name="guard_http_endpoint_2">华为</string>
     <string name="guard_http_endpoint_3">vivo</string>

@@ -4,7 +4,6 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
-import android.os.Build
 import com.wifi.toolbox.structs.GuardSettings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -19,7 +18,6 @@ import java.net.HttpURLConnection
 import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.URL
-import java.util.Locale
 
 /**
  * 单次探测结果
@@ -49,7 +47,7 @@ data class ProbeVerdict(
  *
  * 四种可插拔策略（[GuardSettings.probeModes] 位掩码组合）：
  * - HTTP 204   AOSP 标准探测（与系统 NetworkMonitor 同源），端点可自选预设
- *   （[GuardSettings.httpEndpoint]，任一端点返回 204 即在线、任一成功即刻返回）
+ *   （[GuardSettings.httpEndpoint]，每档对应唯一端点：选谁探谁、返回 204 即在线）
  * - DNS        检测运营商 DNS 黑洞/劫持（204 通但 DNS 死的疑难场景）
  * - ICMP       特权 shell ping（源 IP 绑定 WiFi 接口，应用层全挂时的仲裁手段）
  * - VALIDATED  系统 NET_CAPABILITY_VALIDATED 能力位（最近一次系统验证结论，零开销）
@@ -61,7 +59,7 @@ object NetProber {
     // 均 204 稳定；OPPO 现行域名为 conn2.oppomobile.com（旧 conn.oppomobile.com
     // 已全球 DNS 失效 NXDOMAIN）；魅族 conn.flyme.cn 返回 403 不收录；
     // www.google.cn 解析到 Google 全球 IP 境内大概率不通不收录；
-    // Cloudflare cp 境内可达性一般，仅作境外档备用端点。
+    // Cloudflare cp 境内可达性一般——选该档时境内可能超时（如实暴露）。
     private const val EP_MIUI = "http://connect.rom.miui.com/generate_204"
     private const val EP_HUAWEI = "http://connectivitycheck.platform.hicloud.com/generate_204"
     private const val EP_VIVO = "http://wifi.vivo.com.cn/generate_204"
@@ -70,37 +68,27 @@ object NetProber {
     private const val EP_GSTATIC = "http://connectivitycheck.gstatic.com/generate_204"
     private const val EP_CLOUDFLARE = "http://cp.cloudflare.com/generate_204"
 
-    // HTTP 探测任务常驻 scope（fire-and-forget）：任一端点成功后弃置仍在途的
-    // 被墙端点（由其自身超时收尾），本轮探测即刻返回，不再等最慢端点超时
+    // HTTP 探测任务常驻 scope（fire-and-forget，任务非调用方协程子级）：
+    // 调用方超时可直接返回，在途任务由自身 connect/read 超时收尾；
+    // 机制按端点列表实现（当前每档预设为单端点），多端点竞速可直接复用
     private val httpProbeScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /**
      * HTTP 204 探测端点预设（与 [GuardSettings.httpEndpoint] 档位一一对应），
-     * 每档含主端点 + 备用端点，任一返回 204 即在线。
+     * 每档对应唯一端点——选谁探谁，日志如实显示所选端点的成功/失败明细。
+     * （第十八轮移除各档备用端点：旧「主端点+备用端点任一 204 即在线」的
+     * 竞速机制下，选 Cloudflare 境内慢时总被备用 qualcomm 抢答，日志只见
+     * qualcomm 应答，观感上「选档不生效」；单端点后选择语义完全透明。）
      */
     fun httpEndpoints(preset: Int): List<String> = when (preset) {
-        1 -> listOf(EP_MIUI, EP_QUALCOMM)
-        2 -> listOf(EP_HUAWEI, EP_QUALCOMM)
-        3 -> listOf(EP_VIVO, EP_QUALCOMM)
-        4 -> listOf(EP_OPPO, EP_QUALCOMM)
-        5 -> listOf(EP_QUALCOMM, EP_MIUI)
-        6 -> listOf(EP_GSTATIC, EP_CLOUDFLARE)
-        7 -> listOf(EP_CLOUDFLARE, EP_QUALCOMM)
-        else -> autoHttpEndpoints()
-    }
-
-    /** 智能档（默认）：按设备厂商匹配国内端点（境外同样可达），未匹配回退 高通+Google */
-    private fun autoHttpEndpoints(): List<String> {
-        val m = Build.MANUFACTURER.lowercase(Locale.US)
-        val vendor = when {
-            m.contains("xiaomi") || m.contains("redmi") -> EP_MIUI
-            m.contains("huawei") || m.contains("honor") -> EP_HUAWEI
-            m.contains("vivo") || m.contains("iqoo") -> EP_VIVO
-            m.contains("oppo") || m.contains("oneplus") || m.contains("realme") -> EP_OPPO
-            else -> null
-        }
-        return if (vendor != null) listOf(vendor, EP_QUALCOMM)
-        else listOf(EP_QUALCOMM, EP_GSTATIC)
+        1 -> listOf(EP_MIUI)
+        2 -> listOf(EP_HUAWEI)
+        3 -> listOf(EP_VIVO)
+        4 -> listOf(EP_OPPO)
+        5 -> listOf(EP_QUALCOMM)
+        6 -> listOf(EP_GSTATIC)
+        7 -> listOf(EP_CLOUDFLARE)
+        else -> listOf(EP_QUALCOMM)
     }
 
     // DNS 探测域名：境外公共域 + 境内可解析域，避免单点故障误判
@@ -131,10 +119,10 @@ object NetProber {
         if (modes and GuardSettings.PROBE_HTTP_204 != 0) {
             jobs += async {
                 withTimeoutOrNull(settings.probeTimeoutMs.toLong() + 1000) {
-                    // 端点由预设决定（settings.httpEndpoint），任一返回 204 即在线
-                    //（互备取值，第十六轮修复 .first() 只取首端点的 bug）；
-                    // 全失败时优先暴露 Portal 特征（302/200+body，对 Portal
-                    // 判定与日志诊断更有价值）；两者皆无取首个失败明细。
+                    // 端点由预设决定（settings.httpEndpoint，每档唯一端点：
+                    // 选谁探谁）；全失败时优先暴露 Portal 特征（302/200+body，
+                    // 对 Portal 判定与日志诊断更有价值）；两者皆无取首个失败
+                    // 明细（取值链兼容多端点互备语义，第十六轮修复保留）。
                     val rs = probeHttp204(
                         wifiNetwork, settings.probeTimeoutMs,
                         httpEndpoints(settings.httpEndpoint)
@@ -186,12 +174,14 @@ object NetProber {
     }
 
     /**
-     * HTTP 204 探测：并行探测预设端点列表，任一返回 204 即在线。
-     * 额外识别两类 Portal 特征：302 重定向（跳认证页）、200 + body（推送页）。
+     * HTTP 204 探测：并行探测预设端点列表（当前每档预设为单端点），
+     * 任一返回 204 即在线。额外识别两类 Portal 特征：302 重定向（跳认证
+     * 页）、200 + body（推送页）。
      *
-     * 任一端点成功即刻返回（fire-and-forget 弃置仍在途的被墙端点，由其自身
-     * 超时收尾）——旧实现 awaitAll 等最慢端点，境内被墙的 gstatic 会把每轮
-     * HTTP 探测拖满超时；全失败时收齐全部结果以暴露 Portal 特征。
+     * 探测任务挂在常驻 scope（fire-and-forget，非本协程子级）：调用方超时
+     * 可直接返回，在途任务由自身超时收尾——旧实现 awaitAll 等最慢端点，
+     * 境内被墙的 gstatic 会把每轮 HTTP 探测拖满超时；全失败时收齐全部
+     * 结果以暴露 Portal 特征。
      */
     private suspend fun probeHttp204(
         wifiNetwork: Network?,

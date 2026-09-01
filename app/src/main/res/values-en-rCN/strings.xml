@@ -269,9 +269,8 @@
     <string name="guard_notif_heal_fail_text">%1$s still offline after reconnect; will retry with backoff</string>
     <string name="guard_cat_probe">Detection methods</string>
     <string name="guard_probe_http">HTTP 204 probe</string>
-    <string name="guard_probe_http_tip">AOSP standard probe, selectable endpoints, any 204 = online</string>
+    <string name="guard_probe_http_tip">AOSP standard probe, uses the selected endpoint, 204 = online</string>
     <string name="guard_http_endpoint">HTTP probe endpoint</string>
-    <string name="guard_http_endpoint_0">Auto (match device vendor)</string>
     <string name="guard_http_endpoint_1">Xiaomi</string>
     <string name="guard_http_endpoint_2">Huawei</string>
     <string name="guard_http_endpoint_3">vivo</string>

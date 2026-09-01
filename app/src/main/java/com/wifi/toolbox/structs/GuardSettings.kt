@@ -23,17 +23,17 @@ data class GuardSettings(
     val probeTimeoutMs: Int = PROBE_TIMEOUT_MS_DEFAULT,
 
     /**
-     * HTTP 204 探测端点预设（NetProber.httpEndpoints，每档含主端点+备用端点，
-     * 任一返回 204 即在线；国内厂商端点经联网考证与连通性验证 2026-09）：
-     * 0 = 智能（默认）：按设备厂商自动匹配（小米/华为/vivo/OPPO → 厂商端点
-     *     + 高通备用；未匹配厂商 → 高通 + Google）
+     * HTTP 204 探测端点预设（NetProber.httpEndpoints，每档对应唯一端点：
+     * 选谁探谁、返回 204 即在线；国内厂商端点经联网考证与连通性验证 2026-09）：
      * 1 = 小米 connect.rom.miui.com
      * 2 = 华为 connectivitycheck.platform.hicloud.com
      * 3 = vivo wifi.vivo.com.cn
      * 4 = OPPO conn2.oppomobile.com（旧 conn. 域名已 DNS 失效）
-     * 5 = 高通 www.qualcomm.cn
+     * 5 = 高通 www.qualcomm.cn（默认）
      * 6 = Google 国际 connectivitycheck.gstatic.com（境内被墙）
-     * 7 = Cloudflare cp.cloudflare.com
+     * 7 = Cloudflare cp.cloudflare.com（境内可达性一般）
+     * 第十七轮的智能档（0=按 Build.MANUFACTURER 匹配厂商端点+备用）
+     * 已按需求移除：读取旧存值 0（智能档/历史默认）时迁移为本默认值 5。
      */
     val httpEndpoint: Int = HTTP_ENDPOINT_DEFAULT,
 
@@ -233,7 +233,8 @@ data class GuardSettings(
         // ---- 默认值 ----
         const val PROBE_MODES_DEFAULT = 0b0011 // HTTP 204 + DNS
         const val PROBE_TIMEOUT_MS_DEFAULT = 4000
-        const val HTTP_ENDPOINT_DEFAULT = 0
+        /** HTTP 端点默认档：高通（第十八轮起；旧默认智能档 0 已移除，读取时迁移） */
+        const val HTTP_ENDPOINT_DEFAULT = 5
         const val FAIL_THRESHOLD_DEFAULT = 2
         const val CHECK_INTERVAL_SEC_DEFAULT = 30
         /** 疑似间隔默认跟随检测间隔（0=哨兵：与历史行为严格一致） */
@@ -300,9 +301,11 @@ data class GuardSettings(
             return GuardSettings(
                 probeModes = prefs.getInt(PROBE_MODES_KEY, PROBE_MODES_DEFAULT),
                 probeTimeoutMs = prefs.getInt(PROBE_TIMEOUT_MS_KEY, PROBE_TIMEOUT_MS_DEFAULT),
+                // 旧版智能档(0)/越界存值 → 高通默认；1..7 原档位保留（第十八轮迁移，
+                // 无需写回：映射无状态幂等，存值 0 每次读取都得到 5）
                 httpEndpoint = prefs.getInt(
                     HTTP_ENDPOINT_KEY, HTTP_ENDPOINT_DEFAULT
-                ).coerceIn(0, 7),
+                ).let { if (it in 1..7) it else HTTP_ENDPOINT_DEFAULT },
                 failThreshold = prefs.getInt(FAIL_THRESHOLD_KEY, FAIL_THRESHOLD_DEFAULT),
                 checkIntervalSec = prefs.getInt(
                     CHECK_INTERVAL_SEC_KEY, CHECK_INTERVAL_SEC_DEFAULT

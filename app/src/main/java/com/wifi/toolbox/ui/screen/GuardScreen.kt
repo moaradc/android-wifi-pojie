@@ -1089,12 +1089,12 @@ private fun GuardSettingsPage(settings: MutableState<GuardSettings>, app: Toolbo
                     icon = { Icon(Icons.Filled.Language, null) }
                 )
             }
-            // HTTP 204 探测端点预设（仅 HTTP 策略启用时显示；
-            // 智能档按设备厂商自动匹配，每档含备用端点任一 204 即在线）
+            // HTTP 204 探测端点预设（仅 HTTP 策略启用时显示）。每档对应唯一
+            // 端点：选谁探谁（第十八轮移除智能档与各档备用端点）；摘要附
+            // 该档端点域名，预设对应的链接一目了然
             if (probeHttp) {
                 item {
-                    val endpointValues = listOf(
-                        stringResource(R.string.guard_http_endpoint_0),
+                    val endpointLabels = listOf(
                         stringResource(R.string.guard_http_endpoint_1),
                         stringResource(R.string.guard_http_endpoint_2),
                         stringResource(R.string.guard_http_endpoint_3),
@@ -1103,17 +1103,31 @@ private fun GuardSettingsPage(settings: MutableState<GuardSettings>, app: Toolbo
                         stringResource(R.string.guard_http_endpoint_6),
                         stringResource(R.string.guard_http_endpoint_7)
                     )
-                    val endpointIdx = s.httpEndpoint.coerceIn(0, endpointValues.size - 1)
+                    // 各档端点域名（与 NetProber 预设一一对应，仅摘要展示用）
+                    val endpointHosts = listOf(
+                        "connect.rom.miui.com",
+                        "connectivitycheck.platform.hicloud.com",
+                        "wifi.vivo.com.cn",
+                        "conn2.oppomobile.com",
+                        "www.qualcomm.cn",
+                        "connectivitycheck.gstatic.com",
+                        "cp.cloudflare.com"
+                    )
+                    // 档位值 1..7（0=旧智能档已移除），换算为列表索引 0..6
+                    val endpointIdx = (s.httpEndpoint - 1)
+                        .coerceIn(0, endpointLabels.size - 1)
                     ListPreference(
                         value = endpointIdx,
                         onValueChange = { i ->
-                            settings.value = s.copy(httpEndpoint = i)
+                            settings.value = s.copy(httpEndpoint = i + 1)
                         },
                         title = { Text(stringResource(R.string.guard_http_endpoint)) },
-                        summary = { Text(endpointValues[endpointIdx]) },
+                        summary = {
+                            Text("${endpointLabels[endpointIdx]} · ${endpointHosts[endpointIdx]}")
+                        },
                         icon = { Icon(Icons.Filled.Cloud, null) },
-                        values = endpointValues.indices.toList(),
-                        valueToText = { i: Int -> AnnotatedString(endpointValues[i]) },
+                        values = endpointLabels.indices.toList(),
+                        valueToText = { i: Int -> AnnotatedString(endpointLabels[i]) },
                         type = ListPreferenceType.DROPDOWN_MENU
                     )
                 }
