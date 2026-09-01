@@ -83,7 +83,18 @@ object NetProber {
         if (modes and GuardSettings.PROBE_HTTP_204 != 0) {
             jobs += async {
                 withTimeoutOrNull(settings.probeTimeoutMs.toLong() + 1000) {
-                    probeHttp204(wifiNetwork, settings.probeTimeoutMs).first()
+                    // 双端点任一 204 即在线（互备设计本意，与 KDoc 声明一致）。
+                    // 旧实现 .first() 只取列表首位（gstatic 端点）结果，备用
+                    // 端点（qualcomm.cn）的成功被直接丢弃——境内 gstatic 被
+                    // TCP 黑洞时网络完全正常 HTTP 仍报 SocketTimeoutException，
+                    // 仅靠 ICMP/其他策略兜底才不误判断网。现改为：
+                    // 任一成功优先；全失败时优先暴露 Portal 特征（302/200+body，
+                    // 对 Portal 判定与日志诊断更有价值）；两者皆无取首个失败
+                    // 明细（保持 gstatic 超时类报错可见，便于定位）。
+                    val rs = probeHttp204(wifiNetwork, settings.probeTimeoutMs)
+                    rs.firstOrNull { it.ok }
+                        ?: rs.firstOrNull { it.isPortal }
+                        ?: rs.first()
                 } ?: ProbeResult("HTTP", false, "timeout")
             }
         }
