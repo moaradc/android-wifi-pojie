@@ -62,7 +62,6 @@ data class CurrentNetworkInfo(
     val connected: Boolean,
     val ssid: String,                   // WifiIdentity 三级解析（定位无关兜底）
     val netId: Int,                     // 当前连接的 networkId（定位关闭时经特权通道解析，不可得为 -1）
-    val bssid: String,                  // 定位关闭时经特权通道解析兜底；仍不可得为空/匿名占位
     val rssi: Int,                      // dBm，免定位
     val linkSpeedMbps: Int,             // 协商速率，免定位
     val frequencyMhz: Int,              // 免定位
@@ -90,7 +89,6 @@ data class NetworkEntry(
     val connected: Boolean,             // WiFi 占位卡（未连接）为 false
     val handle: Long,                   // networkHandle（展开状态记忆与列表 key）
     val title: String,                  // WiFi: SSID；移动数据: 运营商名
-    val bssid: String = "",             // WiFi 专属（可能被系统匿名化为 02:00:…）
     val validated: Boolean = false,     // 系统验证结论（NET_CAPABILITY_VALIDATED）
     val portal: Boolean = false,        // 需网页认证（NET_CAPABILITY_CAPTIVE_PORTAL）
     // ---- WiFi 专属 ----
@@ -106,9 +104,6 @@ data class NetworkEntry(
     val carrier: String = "",           // 运营商名（title 为空时兼作标题）
     val roaming: Boolean = false
 )
-
-/** WifiInfo.getBSSID() 在定位服务关闭等场景返回的匿名化占位 MAC（非真实 BSSID） */
-const val ANONYMIZED_BSSID = "02:00:00:00:00:00"
 
 /**
  * Android 10+ 系统对普通应用读取已保存配置时下发的密码掩码
@@ -258,7 +253,7 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
 
     // ---- Tab3 状态 ----
     var currentInfoState by remember {
-        mutableStateOf(CurrentNetworkInfo(false, "", -1, "", 0, 0, 0, "", "", emptyList(), "", 0, false))
+        mutableStateOf(CurrentNetworkInfo(false, "", -1, 0, 0, 0, "", "", emptyList(), "", 0, false))
     }
 
     // ---- Tab3 多网络列表 + 认证网络检测 ----
@@ -269,7 +264,6 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
     // ---- 当前 WiFi 身份会话缓存（networkHandle 变化 = 新连接会话） ----
     var identitySsidState by remember { mutableStateOf("") }
     var identityNetIdState by remember { mutableStateOf(-1) }
-    var identityBssidState by remember { mutableStateOf("") }
     var identityHandleState by remember { mutableLongStateOf(0L) }
     var lastIdentityResolveAt by remember { mutableLongStateOf(0L) }
     var identityJob by remember { mutableStateOf<Job?>(null) }
@@ -524,7 +518,7 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
         return NetworkEntry(
             isWifi = true, connected = info.connected,
             handle = handle,
-            title = info.ssid, bssid = info.bssid,
+            title = info.ssid,
             validated = info.validated,
             rssi = info.rssi, linkSpeedMbps = info.linkSpeedMbps,
             frequencyMhz = info.frequencyMhz,
@@ -606,7 +600,7 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
                         ?.takeIf { it.isNotEmpty() && it !in badSsids } ?: ""
                     entries += NetworkEntry(
                         isWifi = true, connected = true, handle = handle,
-                        title = ssid, bssid = try { ti?.bssid.orEmpty() } catch (_: Exception) { "" },
+                        title = ssid,
                         validated = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED),
                         portal = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL),
                         rssi = try { ti?.rssi ?: -200 } catch (_: Exception) { -200 },
@@ -705,22 +699,15 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
             info?.ssid?.removeSurrounding("\"")?.takeIf { it.isNotEmpty() && it !in badSsids } ?: ""
         } catch (_: Exception) { "" }
         val quickNetId = try { info?.networkId ?: -1 } catch (_: Exception) { -1 }
-        // 应用层 BSSID 直读：定位可用时即真实值；匿名化占位（定位关闭等
-        // 场景，02:00:00:00:00:00）视同不可得，经特权解析结果兜底
-        val quickBssidRaw = try { info?.bssid.orEmpty() } catch (_: Exception) { "" }
-        val quickBssid = if (quickBssidRaw.equals(ANONYMIZED_BSSID, ignoreCase = true)) ""
-        else quickBssidRaw
 
         if (!connected) {
             identitySsidState = ""
             identityNetIdState = -1
-            identityBssidState = ""
             identityHandleState = 0L
         } else if (handle != 0L && handle != identityHandleState) {
             // 新 WiFi 会话：清旧身份，异步经特权通道解析（定位关闭时唯一途径）
             identitySsidState = ""
             identityNetIdState = -1
-            identityBssidState = ""
             if (System.currentTimeMillis() - lastIdentityResolveAt > 3000) {
                 lastIdentityResolveAt = System.currentTimeMillis()
                 identityHandleState = handle
@@ -730,7 +717,6 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
                     if (identityHandleState == handle) {
                         identitySsidState = d.ssid
                         identityNetIdState = d.netId
-                        identityBssidState = d.bssid
                     }
                 }
             } else {
@@ -778,9 +764,6 @@ fun rememberManagerController(context: Context, app: ToolboxApp): ManagerControl
             connected = connected,
             ssid = quickSsid.ifEmpty { if (cacheValid) identitySsidState else "" },
             netId = if (quickNetId >= 0) quickNetId else if (cacheValid) identityNetIdState else -1,
-            bssid = quickBssid
-                .ifEmpty { if (cacheValid) identityBssidState else "" }
-                .ifEmpty { quickBssidRaw },   // 特权亦不可得：保留占位值→UI 如实提示「已隐藏」
             rssi = try { info?.rssi ?: -200 } catch (_: Exception) { -200 },
             linkSpeedMbps = try { info?.linkSpeed ?: -1 } catch (_: Exception) { -1 },
             frequencyMhz = try { info?.frequency ?: 0 } catch (_: Exception) { 0 },

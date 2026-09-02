@@ -1969,23 +1969,9 @@ private fun NetworkCard(
                 fontWeight = FontWeight.SemiBold,
                 color = heavierOnSurface()
             )
-            // 副标题：WiFi=BSSID；移动数据=连接状态
-            if (entry.isWifi) {
-                // 定位服务关闭等场景 WifiInfo.getBSSID() 返回匿名化占位 MAC
-                // （02:00:00:00:00:00），并非真实 BSSID——如实提示而非展示假地址
-                if (entry.bssid.isNotEmpty()) {
-                    val isAnonymized =
-                        entry.bssid.equals(ANONYMIZED_BSSID, ignoreCase = true)
-                    Text(
-                        text = if (isAnonymized)
-                            stringResource(R.string.mgr_bssid_hidden)
-                        else entry.bssid,
-                        style = MaterialTheme.typography.bodySmall,
-                        fontFamily = FontFamily.Monospace,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            } else {
+            // 副标题：移动数据=连接状态（WiFi 副标题原为 BSSID，已按要求整体
+            // 移除——定位/特权通道下 BSSID 的可得性不再影响网络页任何展示）
+            if (!entry.isWifi) {
                 Text(
                     text = stringResource(
                         if (entry.validated) R.string.mgr_mobile_connected_validated
