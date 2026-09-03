@@ -21,7 +21,7 @@ data class GuardEvent(
     val time: Long,
     val ssid: String,
     val failedProbes: String, // 失败的检测项，如 "HTTP,DNS"
-    val actions: String,      // 执行的自愈动作链，如 "reassociate"
+    val actions: String,      // 尝试的自愈动作链（含执行失败动作，如实反映升压过程）
     val recovered: Boolean,   // 自愈后是否恢复
     val costMs: Long          // 自愈总耗时
 )
@@ -52,7 +52,9 @@ class GuardStats(context: Context) {
     var events by mutableStateOf(emptyList<GuardEvent>())
         private set
 
-    /** 自愈动作有效率（动作名 -> (执行次数, 成功次数)） */
+    /** 自愈动作有效率（动作名 -> (执行成功次数, 其中自愈恢复次数)）。
+     *  只统计执行成功的动作——执行失败（通道返回失败/该版本无此命令）的动作
+     *  未对网络产生任何效果，计入会虚增成功率并误导高成功率档选优 */
     val actionStats = mutableStateMapOf<String, Pair<Int, Int>>()
     init {
         load()
@@ -65,19 +67,30 @@ class GuardStats(context: Context) {
         persist()
     }
 
-    fun recordHeal(actions: List<String>, recovered: Boolean, costMs: Long, ssid: String, failedProbes: String) {
+    /**
+     * 记录一次自愈：动作有效率只累计「执行成功」的动作（事件历史的动作链
+     * 仍保留完整尝试记录，与实时日志一致）；旧版本已计入的失败动作计数
+     * 不做追溯清洗，需要精确观察可手动清零后重新累积。
+     */
+    fun recordHeal(
+        actionRuns: List<HealActionRun>,
+        recovered: Boolean,
+        costMs: Long,
+        ssid: String,
+        failedProbes: String
+    ) {
         totalHeals++
         if (recovered) totalRecovered++
-        actions.forEach { action ->
-            val pair = actionStats[action] ?: (0 to 0)
-            actionStats[action] = pair.first + 1 to pair.second + if (recovered) 1 else 0
+        actionRuns.filter { it.ok }.forEach {
+            val pair = actionStats[it.action] ?: (0 to 0)
+            actionStats[it.action] = pair.first + 1 to pair.second + if (recovered) 1 else 0
         }
         events = (listOf(
             GuardEvent(
                 time = System.currentTimeMillis(),
                 ssid = ssid,
                 failedProbes = failedProbes,
-                actions = actions.joinToString("+"),
+                actions = actionRuns.joinToString("+") { it.action },
                 recovered = recovered,
                 costMs = costMs
             )
@@ -196,6 +209,7 @@ class GuardStats(context: Context) {
      * "成功 50/100" 排在 "成功 2/2" 之前：样本量大的动作更可信，
      * 避免只试过一次的动作因 100% 成功率而垄断选择。
      * 无任何统计数据时返回 null（下拉菜单中不展示该档位）。
+     * 样本口径与 [recordHeal] 一致：仅执行成功的动作参与选优。
      */
     fun bestAction(): String? {
         return actionStats.entries

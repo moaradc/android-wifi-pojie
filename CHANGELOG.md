@@ -1,3 +1,8 @@
+# v3.0.0_Alpha-001
+
+- 修复：网络守护统计页「自愈动作有效率」计入执行失败动作（真机反馈：reassociate/reconnect 执行失败（通道 Shizuku）后 disable+enable 成功恢复，统计却出现 reassociate 1 / reconnect 计数 +1）——执行失败＝通道返回失败或该系统版本无此命令，动作未对网络产生任何效果，计入既虚增成功率也污染「高成功率档」选优（reconnect 3 实为 2 次执行成功 + 1 次执行失败）；heal() 返回值 List<String>→List<HealActionRun>（动作名＋执行成败），recordHeal 只累计执行成功的动作，事件历史动作链保留完整尝试记录（含失败动作，与实时日志一致如实反映升压过程），actionStats/bestAction 口径注明仅执行成功；既有历史统计不追溯清洗，需要精确观察可手动清零后重新累积；0 字符串改动
+- 版本：v3.0.0_Alpha-07 → v3.0.0_Alpha-001（versionCode 6→7）——本版本替换此前发布的同名 Release：原 v3.0.0_Alpha-001 所含「八级自愈动作体系升级（五级→八级阶梯＋故障域前置诊断）」已按用户决策整体撤回，本版本回到 Alpha-07（第二十轮）代码基线，自愈动作体系保持五级阶梯不变，仅含上方统计修复；已安装原 Alpha-001 的设备直接覆盖安装本版本即可
+
 # v3.0.0_Alpha-07
 
 - 移除：网络页 WiFi 卡片 BSSID 副标题整体下线（用户决策：回滚第十九轮「BSSID 特权兜底失效修复 + 来源标签三页统一」方案，回到第十八轮基线后仅做本项修改）——此前该副标题在定位可用时显示 BSSID、不可用时显示「BSSID 已被系统隐藏（开启定位或授权特权通道后可显示）」提示，而第十九轮真机反馈证实特权通道授权后仍可能不可得（会话建立时未授权则不重试、个别 ROM 特权输出亦被脱敏），与其继续修补展示链路不如直接不展示；移动数据卡片的连接状态副标题、WiFi 卡片的信号仪表与分割线下方详情（信号/速率/频段/信道/IP/网关/DNS/DHCP/租约）不受影响；扫描页 BSSID 详情行与「复制 BSSID」按钮、已保存页、破解页 BSSID 匹配逻辑均不受影响（各页数据链路独立）；仅服务该显示的解析链路连带零残留清理：NetworkEntry.bssid / CurrentNetworkInfo.bssid / identityBssidState / 应用层 quickBssid 直读与匿名化判断（ANONYMIZED_BSSID 常量）/ WifiIdentity 的 Identity.bssid 输出、ParsedInfo.bssid、parseBssidOfInfoLine 与 cmd wifi status、dumpsys 特权回退的 BSSID 触发条件（收窄为 SSID 或 networkId 不可得——定位关闭时 SSID 与 BSSID 受同一套 REDACT 屏蔽，回退触发行为不变；仅「SSID/networkId 可读而 BSSID 被脱敏」的个别 ROM 场景省去一次只为取 BSSID 的特权命令，纯收益）/ mgr_bssid_hidden 字符串 ×5 语言；1 字符串移除 ×5 语言 (版本号保持不变)

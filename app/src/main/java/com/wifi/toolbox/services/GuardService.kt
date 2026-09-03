@@ -483,7 +483,9 @@ class GuardService : Service() {
         val failedProbes = verdict.results.filter { !it.ok }.joinToString(",") { it.mode }
         val start = System.currentTimeMillis()
 
-        val executed = healer.heal(
+        // 执行结果携带每个动作的成败：统计只累计执行成功的动作
+        // （执行失败未产生效果，计入会虚增有效率）；事件历史保留完整尝试链
+        val actionRuns = healer.heal(
             settings = settings,
             ssid = ssid,
             netId = netId,
@@ -506,7 +508,7 @@ class GuardService : Service() {
         }
 
         val cost = System.currentTimeMillis() - start
-        stats.recordHeal(executed, recovered, cost, ssid, failedProbes)
+        stats.recordHeal(actionRuns, recovered, cost, ssid, failedProbes)
 
         if (recovered) {
             consecutiveHealFails = 0

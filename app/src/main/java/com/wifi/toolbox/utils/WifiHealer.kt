@@ -27,6 +27,18 @@ object HealActions {
     const val WIFI_CYCLE = "wifi cycle"
 }
 
+/**
+ * 单个自愈动作的执行结果：动作名 + 执行成败。
+ *
+ * 区分「尝试」与「执行成功」是统计正确性的前提——执行失败（通道返回失败/
+ * 该版本无此命令）的动作未对网络产生任何效果，计入动作有效率会虚增成功率
+ * 并误导高成功率档选优；事件历史则保留完整尝试链（含失败动作）以如实反映升压过程。
+ */
+data class HealActionRun(
+    val action: String,
+    val ok: Boolean
+)
+
 /** 特权执行通道名（日志/状态展示用，与设置项对应） */
 object GuardChannels {
     const val SHIZUKU = "Shizuku"
@@ -149,7 +161,8 @@ class WifiHealer(
      *
      * @param verify 每个动作后的即时验证（轻量单项探测，返回 true 则停止升压）
      * @param actionStats 历史动作统计（高成功率档动态选优的依据）
-     * @return 实际执行的动作列表（按执行顺序）
+     * @return 实际尝试的动作结果列表（按执行顺序，携带每个动作的执行成败：
+     *   统计层只累计执行成功的动作，事件历史保留完整尝试链）
      */
     suspend fun heal(
         settings: GuardSettings,
@@ -158,9 +171,9 @@ class WifiHealer(
         verify: suspend () -> Boolean,
         log: (String) -> Unit,
         actionStats: Map<String, Pair<Int, Int>> = emptyMap()
-    ): List<String> {
+    ): List<HealActionRun> {
         val plan = planActions(settings, actionStats)
-        val executed = mutableListOf<String>()
+        val executed = mutableListOf<HealActionRun>()
         for (action in plan) {
             val start = System.currentTimeMillis()
             val ok = try {
@@ -169,7 +182,7 @@ class WifiHealer(
                 log(context.getString(R.string.guard_log_action_error, action, e.message ?: ""))
                 false
             }
-            executed += action
+            executed += HealActionRun(action, ok)
             // 动作日志携带实际执行通道（runPrivileged 执行时写入 GuardState.lastHealChannel）
             val channel = GuardState.lastHealChannel.ifEmpty { "-" }
             log(
