@@ -526,13 +526,17 @@ class GuardService : Service() {
             // 登记下一个退避窗口（时间戳门槛，performHeal 入口按此跳过等待）。
             // 固定等待：用户需求移除指数翻倍——设置多少秒就等多少秒，
             // 行为可预期（不再 30→60→120→…→15分钟封顶翻倍）；
+            // 退避基数 0 = 关闭退避（backoffUntilMs=now，下一轮立即重试，
+            // 亦不再输出「退避等待」日志）；
             // 熔断次数上限（healMaxAttempts）仍负责防路由器断电空转
             val capped = settings.healCooldownBaseSec * 1000L
             backoffUntilMs = System.currentTimeMillis() + capped
             backoffSkipNotified = false
             GuardState.currentState = GuardState.STATE_HEAL_FAILED
             log(getString(R.string.guard_log_heal_fail, consecutiveHealFails), GuardLog.LEVEL_ERROR)
-            log(getString(R.string.guard_log_backoff, capped / 1000), GuardLog.LEVEL_HEAL)
+            if (capped > 0) {
+                log(getString(R.string.guard_log_backoff, capped / 1000), GuardLog.LEVEL_HEAL)
+            }
             if (settings.notifyOnHealFail) {
                 notifyEvent(getString(R.string.guard_notif_heal_fail_title), getString(R.string.guard_notif_heal_fail_text, ssid))
             }
@@ -573,8 +577,13 @@ class GuardService : Service() {
         val intent = Intent(this, com.wifi.toolbox.ui.MainActivity::class.java).apply {
             putExtra("target", "Guard")
         }
+        // requestCode 必须与 PojieNotification 的 0 区分：PendingIntent 匹配
+        // 只看 Intent.filterEquals（component/action/data 等，忽略 extras），
+        // 同键会复用先注册的实例——密码字典破解通知先建（target=Pojie）时，
+        // 守护通知会被同键顶替，点击落到密码字典破解-运行页而非网络守护-状态页
         val pendingIntent = PendingIntent.getActivity(
-            this, 0, intent, PendingIntent.FLAG_IMMUTABLE
+            this, CONTENT_PI_CODE, intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         // 「关闭守护」：普通 getService 即可（服务已在运行，无需前台化义务；
         // 若用 getForegroundService 会因 ACTION_STOP 提前 return 不调 startForeground 而超时崩溃）
@@ -583,7 +592,7 @@ class GuardService : Service() {
             Intent(this, GuardService::class.java).apply { action = ACTION_STOP },
             PendingIntent.FLAG_IMMUTABLE
         )
-        // 「结束」：广播接收器直接杀进程（通知操作按钮 PendingIntent 在
+        // 「关闭应用」：广播接收器直接杀进程（通知操作按钮 PendingIntent 在
         // 临时白名单内，允许后台启动组件；杀进程本身无需前台服务）
         val killIntent = PendingIntent.getBroadcast(
             this, 11,
@@ -716,6 +725,13 @@ class GuardService : Service() {
         /** 心跳闹钟 PendingIntent 请求码（与通知按钮 10/11/20/21 不冲突） */
         const val HEARTBEAT_PI_CODE = 30
 
+        /**
+         * 守护通知 contentIntent 请求码：与 PojieNotification 的 0 区分——
+         * PendingIntent 按 Intent.filterEquals 匹配（忽略 extras），同键先注册者胜，
+         * 否则守护通知会复用破解通知的 target=Pojie，点击跳到密码字典破解-运行页
+         */
+        const val CONTENT_PI_CODE = 1
+
         /** 心跳闹钟下限间隔（秒）：正常态主循环自跑，心跳仅作看门狗 */
         const val HEARTBEAT_MIN_SEC = 60
 
@@ -753,8 +769,10 @@ class GuardService : Service() {
             val intent = Intent(context, com.wifi.toolbox.ui.MainActivity::class.java).apply {
                 putExtra("target", "Guard")
             }
+            // 同 buildNotification：独立 requestCode 防 PojieNotification（0）同键复用
             val pendingIntent = PendingIntent.getActivity(
-                context, 0, intent, PendingIntent.FLAG_IMMUTABLE
+                context, CONTENT_PI_CODE, intent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
             )
             // 「开启守护」：服务未运行，须用 getForegroundService（守护服务
             // 启动后 5s 内会 startForeground，满足前台服务义务；通知操作按钮

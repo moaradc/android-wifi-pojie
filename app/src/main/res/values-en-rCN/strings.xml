@@ -225,7 +225,7 @@
     <string name="guard_name">Network Guard</string>
     <string name="guard_notif_action_start">Start</string>
     <string name="guard_notif_action_stop">Stop</string>
-    <string name="guard_notif_action_exit">Exit</string>
+    <string name="guard_notif_action_exit">Close app</string>
     <string name="guard_cat_keepalive">Background keep-alive</string>
     <string name="guard_keepalive_wakelock">Wake lock</string>
     <string name="guard_keepalive_wakelock_tip">Keeps the process running in the background (some systems may still kill it)</string>
@@ -316,6 +316,7 @@
     <string name="guard_sec_value">%1$ds</string>
     <string name="guard_cooldown_base">Backoff base</string>
     <string name="guard_cooldown_base_tip">Fixed wait of %1$ds before retrying after a failed heal</string>
+    <string name="guard_cooldown_base_off">Disabled: retry immediately after a failed heal</string>
     <string name="guard_heal_channel">Heal channel</string>
     <string name="guard_channel_auto">Auto (Shizuku→Root→API)</string>
     <string name="guard_channel_aidl">Root AIDL</string>

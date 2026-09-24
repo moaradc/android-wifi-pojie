@@ -1368,10 +1368,19 @@ private fun GuardSettingsPage(settings: MutableState<GuardSettings>, app: Toolbo
                 val state = remember { mutableStateOf(s.healCooldownBaseSec.toFloat()) }
                 SliderPreference(
                     state = state,
-                    valueRange = 5f..120f,
-                    valueSteps = 22,
+                    // 最低档 0 = 关闭退避（失败后立即再试）；步进仍为 5s
+                    //（0~120 共 25 档，steps=23 → (120-0)/24=5s）
+                    valueRange = 0f..120f,
+                    valueSteps = 23,
                     title = { Text(stringResource(R.string.guard_cooldown_base)) },
-                    summary = { Text(stringResource(R.string.guard_cooldown_base_tip, state.value.toInt())) },
+                    summary = {
+                        Text(
+                            if (state.value.toInt() == 0)
+                                stringResource(R.string.guard_cooldown_base_off)
+                            else
+                                stringResource(R.string.guard_cooldown_base_tip, state.value.toInt())
+                        )
+                    },
                     icon = { Icon(Icons.Filled.HourglassTop, null) }
                 )
                 LaunchedEffect(state.value) {

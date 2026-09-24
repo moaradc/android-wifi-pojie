@@ -224,7 +224,7 @@
     <string name="guard_name">網絡守護</string>
     <string name="guard_notif_action_start">開啟</string>
     <string name="guard_notif_action_stop">關閉</string>
-    <string name="guard_notif_action_exit">結束</string>
+    <string name="guard_notif_action_exit">關閉應用</string>
     <string name="guard_cat_keepalive">後臺保活</string>
     <string name="guard_keepalive_wakelock">喚醒鎖</string>
     <string name="guard_keepalive_wakelock_tip">保持進程於後臺運行（部分系統或致殺後臺）</string>
@@ -315,6 +315,7 @@
     <string name="guard_sec_value">%1$ds</string>
     <string name="guard_cooldown_base">退避基數</string>
     <string name="guard_cooldown_base_tip">自癒失敗後固定等待 %1$ds 再重試</string>
+    <string name="guard_cooldown_base_off">已關閉：自癒失敗後立即重試</string>
     <string name="guard_heal_channel">自癒執行通道</string>
     <string name="guard_channel_auto">自動（Shizuku→Root→API）</string>
     <string name="guard_channel_aidl">Root AIDL</string>

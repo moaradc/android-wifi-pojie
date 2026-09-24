@@ -1,3 +1,10 @@
+# v3.0.0_Alpha-002
+
+- 修复：网络守护通知点击跳转错误（真机反馈：点通知进入的是密码字典破解-运行页，而非网络守护-状态页）——守护前台/常驻通知与密码字典破解通知的 contentIntent 同用 requestCode=0 的 MainActivity PendingIntent，而系统按 Intent.filterEquals 匹配（只看 component/action/data，忽略 extras），同键先注册者胜：破解通知先建（target=Pojie）后，守护通知（target=Guard）被同键顶替；守护通知改用独立请求码并附加 FLAG_UPDATE_CURRENT，确保始终携带 target=Guard 落到网络守护-状态页
+- 文本：网络守护通知操作按钮「结束」改为「关闭应用」（zh/zh-rTW/lzh/en/en-rCN 五语言资源同步；行为不变，仍由广播接收器直接杀进程）
+- 调整：网络守护「退避基数」下限从 5s 放宽至 0s，0 = 关闭退避（自愈失败后下一轮立即重试）——设置页滑条 5~120s 调整为 0~120s（步进仍 5s；0 档摘要显示「已关闭：自愈失败后立即重试」），读档校验 coerceIn(5, 600) 放宽为 coerceIn(0, 600)，退避基数为 0 时不再输出「退避等待」日志；防空转仍由熔断次数上限负责
+- 版本：v3.0.0_Alpha-001 → v3.0.0_Alpha-002（versionCode 7→8）
+
 # v3.0.0_Alpha-001
 
 - 修复：网络守护统计页「自愈动作有效率」计入执行失败动作（真机反馈：reassociate/reconnect 执行失败（通道 Shizuku）后 disable+enable 成功恢复，统计却出现 reassociate 1 / reconnect 计数 +1）——执行失败＝通道返回失败或该系统版本无此命令，动作未对网络产生任何效果，计入既虚增成功率也污染「高成功率档」选优（reconnect 3 实为 2 次执行成功 + 1 次执行失败）；heal() 返回值 List<String>→List<HealActionRun>（动作名＋执行成败），recordHeal 只累计执行成功的动作，事件历史动作链保留完整尝试记录（含失败动作，与实时日志一致如实反映升压过程），actionStats/bestAction 口径注明仅执行成功；既有历史统计不追溯清洗，需要精确观察可手动清零后重新累积；0 字符串改动

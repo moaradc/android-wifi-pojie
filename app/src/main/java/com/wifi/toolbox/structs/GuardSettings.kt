@@ -94,6 +94,7 @@ data class GuardSettings(
     /**
      * 自愈失败后等待多久再试（秒，固定值不再翻倍）：防止路由器
      * 已断电/光猫故障时的无效轰炸。防空转主要由熔断次数上限负责。
+     * 0 = 关闭退避（失败后下一轮立即再试）。
      */
     val healCooldownBaseSec: Int = HEAL_COOLDOWN_BASE_SEC_DEFAULT,
 
@@ -328,7 +329,7 @@ data class GuardSettings(
                 ).coerceIn(5, 120),
                 healCooldownBaseSec = prefs.getInt(
                     HEAL_COOLDOWN_BASE_SEC_KEY, HEAL_COOLDOWN_BASE_SEC_DEFAULT
-                ).coerceIn(5, 600),
+                ).coerceIn(0, 600),
                 healMaxAttempts = prefs.getInt(
                     HEAL_MAX_ATTEMPTS_KEY, HEAL_MAX_ATTEMPTS_DEFAULT
                 ).coerceIn(0, 99),
