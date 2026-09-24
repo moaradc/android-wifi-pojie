@@ -280,11 +280,26 @@ class GuardService : Service() {
             autoSaveFlush()
             // 疑似断网（防抖中）用独立快间隔：加速防抖确认与恢复发现；
             // 0/其他状态（在线/链路断/Portal等）用例行检测间隔
-            val interval = (
+            val routine = (
                     if (GuardState.currentState == GuardState.STATE_SUSPECT &&
                         settings.suspectIntervalSec > 0
                     ) settings.suspectIntervalSec else settings.checkIntervalSec
                     ) * 1000L
+            // 退避独立计时（与疑似断网间隔同思路）：退避窗口生效期间，唤醒
+            // 不得晚于退避到期时刻——自愈失败后设 5s 就是约 5s 后检测并重试，
+            // 不再被例行检测间隔（如 30s）拖到下一个检测点；退避长于例行
+            // 间隔时仍按例行节奏持续检测（网络自行恢复在线时照旧复位退避）。
+            // 唤醒点还需满足最小检测间隔防重门槛：backoffUntilMs 与上一轮
+            // 检测完成时刻几乎同刻登记，5s 退避恰好压线 5s 防重门槛，不抬
+            // 的话本轮会被 runOneCheck 防重丢弃、退避白等一个例行周期。
+            val nowMs = System.currentTimeMillis()
+            val backoffRemain = backoffUntilMs - nowMs
+            val gapRemain = lastCheckDoneAt + MIN_CHECK_GAP_MS - nowMs
+            val interval = if (backoffRemain > 0 && backoffRemain < routine) {
+                maxOf(backoffRemain, gapRemain).coerceAtMost(routine)
+            } else {
+                routine
+            }
             // 分片睡眠：设置改小后能尽快生效，同时熄屏下不额外唤醒
             var slept = 0L
             while (slept < interval && scope.isActive) {
@@ -456,8 +471,9 @@ class GuardService : Service() {
             return
         }
 
-        // 指数退避：连续失败后成倍等待（改为时间戳门槛，不占用 healMutex——
-        // 原实现在锁内 delay 最长 15 分钟，期间手动"立即检测"会被互斥锁卡住）
+        // 退避门槛：连续失败后等待冷却再重试（时间戳门槛，不占用 healMutex——
+        // 原实现在锁内 delay 最长 15 分钟，期间手动"立即检测"会被互斥锁卡住；
+        // 唤醒节奏由主循环按 backoffUntilMs 提前到退避到期点，独立于检测间隔）
         val now = System.currentTimeMillis()
         if (backoffUntilMs > now) {
             if (!backoffSkipNotified) {
@@ -523,10 +539,11 @@ class GuardService : Service() {
             }
         } else {
             consecutiveHealFails++
-            // 登记下一个退避窗口（时间戳门槛，performHeal 入口按此跳过等待）。
-            // 固定等待：用户需求移除指数翻倍——设置多少秒就等多少秒，
-            // 行为可预期（不再 30→60→120→…→15分钟封顶翻倍）；
-            // 退避基数 0 = 关闭退避（backoffUntilMs=now，下一轮立即重试，
+            // 登记下一个退避窗口（时间戳门槛，performHeal 入口按此跳过等待，
+            // 主循环同时按此提前唤醒——退避独立计时：设 5s 即失败约 5s 后
+            // 就检测并重试，不再被例行检测间隔拖到下一个检测点）。
+            // 固定等待：设置多少秒就等多少秒（不翻倍）；
+            // 退避基数 0 = 关闭退避（不额外等待，下一轮例行检测即重试，
             // 亦不再输出「退避等待」日志）；
             // 熔断次数上限（healMaxAttempts）仍负责防路由器断电空转
             val capped = settings.healCooldownBaseSec * 1000L

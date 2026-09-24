@@ -1368,8 +1368,9 @@ private fun GuardSettingsPage(settings: MutableState<GuardSettings>, app: Toolbo
                 val state = remember { mutableStateOf(s.healCooldownBaseSec.toFloat()) }
                 SliderPreference(
                     state = state,
-                    // 最低档 0 = 关闭退避（失败后立即再试）；步进仍为 5s
-                    //（0~120 共 25 档，steps=23 → (120-0)/24=5s）
+                    // 最低档 0 = 关闭退避（不额外等待，下一轮例行检测即重试）；
+                    // 步进仍为 5s（0~120 共 25 档，steps=23 → (120-0)/24=5s）；
+                    // 计时独立于检测间隔：设 5s 即失败约 5s 后检测并重试
                     valueRange = 0f..120f,
                     valueSteps = 23,
                     title = { Text(stringResource(R.string.guard_cooldown_base)) },

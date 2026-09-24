@@ -314,8 +314,8 @@
     <string name="guard_heal_verify_timeout">Verify timeout after reconnect</string>
     <string name="guard_sec_value">%1$ds</string>
     <string name="guard_cooldown_base">Backoff base</string>
-    <string name="guard_cooldown_base_tip">Fixed wait of %1$ds before retrying after a failed heal</string>
-    <string name="guard_cooldown_base_off">Disabled: retry immediately after a failed heal</string>
+    <string name="guard_cooldown_base_tip">Wait %1$ds after a failed heal before retrying (independent of the check interval)</string>
+    <string name="guard_cooldown_base_off">Disabled: no extra wait; retry at the next check</string>
     <string name="guard_heal_channel">Heal channel</string>
     <string name="guard_channel_auto">Auto (Shizuku→Root→API)</string>
     <string name="guard_channel_aidl">Root AIDL</string>

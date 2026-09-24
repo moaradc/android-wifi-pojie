@@ -314,8 +314,8 @@
     <string name="guard_heal_verify_timeout">重連後驗證超時</string>
     <string name="guard_sec_value">%1$ds</string>
     <string name="guard_cooldown_base">退避基數</string>
-    <string name="guard_cooldown_base_tip">自癒失敗後固定等待 %1$ds 再重試</string>
-    <string name="guard_cooldown_base_off">已關閉：自癒失敗後立即重試</string>
+    <string name="guard_cooldown_base_tip">自癒失敗後等待 %1$ds 再重試（獨立計時，不疊加檢測間隔）</string>
+    <string name="guard_cooldown_base_off">已關閉：不額外等待，下一輪檢測即重試</string>
     <string name="guard_heal_channel">自癒執行通道</string>
     <string name="guard_channel_auto">自動（Shizuku→Root→API）</string>
     <string name="guard_channel_aidl">Root AIDL</string>
