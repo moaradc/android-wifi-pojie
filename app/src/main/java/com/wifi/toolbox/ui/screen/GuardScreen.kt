@@ -623,18 +623,23 @@ private fun ProbeResultLine(result: ProbeResult) {
 
 /**
  * 日志显示筛选（多选位掩码）：
- * bit0 = 正常（INFO）；bit1 = 异常（WARN+ERROR）；bit2 = 自愈（HEAL）
+ * 与设置页「记录日志类型」(logLevels) 同一套四级位序，术语完全一致：
+ * bit0 = 正常（INFO）；bit1 = 警告（WARN）；bit2 = 错误（ERROR）；bit3 = 自愈（HEAL）
  */
 private const val LOG_FILTER_INFO = 1
-private const val LOG_FILTER_ERROR = 2
-private const val LOG_FILTER_HEAL = 4
-private const val LOG_FILTER_ALL = LOG_FILTER_INFO or LOG_FILTER_ERROR or LOG_FILTER_HEAL
+private const val LOG_FILTER_WARN = 2
+private const val LOG_FILTER_ERROR = 4
+private const val LOG_FILTER_HEAL = 8
+private const val LOG_FILTER_ALL = LOG_FILTER_INFO or LOG_FILTER_WARN or LOG_FILTER_ERROR or LOG_FILTER_HEAL
 
-/** 日志级别 → 显示分组 */
+/** 日志级别 → 显示分组（四级一一对应，不再合并"异常"组） */
 private fun logGroupBit(level: Int): Int = when (level) {
     GuardLog.LEVEL_INFO -> LOG_FILTER_INFO
+    GuardLog.LEVEL_WARN -> LOG_FILTER_WARN
+    GuardLog.LEVEL_ERROR -> LOG_FILTER_ERROR
     GuardLog.LEVEL_HEAL -> LOG_FILTER_HEAL
-    else -> LOG_FILTER_ERROR // WARN + ERROR 归入"异常"
+    // 四级已全覆盖，此分支不可达；兜底返回 ALL 保证未知级别不丢日志
+    else -> LOG_FILTER_ALL
 }
 
 /** 单条日志的可复制文本 */
@@ -644,7 +649,8 @@ private fun formatEntry(entry: GuardLogEntry): String =
 /**
  * 实时日志卡片：
  * - 工具行：复制 / 保存 / 导出(分享) / 管理(已保存列表) / 清空
- * - 筛选多选：全部 / 正常 / 异常 / 自愈（可任意组合，全不选显示空）
+ * - 筛选多选：正常 / 警告 / 错误 / 自愈（与设置页「记录日志类型」
+ *   同一套术语与位序，可任意组合；四项全选即全部，全不选显示空）
  * - 按级别着色展示（最近 50 条）
  * - 保存位置：默认应用私有 log 目录，可在设置页改为 SAF 自选文件夹
  * - [expanded] 展开状态由 GuardScreen 层持有（切页不重置，默认折叠）
@@ -805,29 +811,31 @@ private fun LiveLogCard(
                 ) + fadeOut(tween(150))
             ) {
                 Column {
-                    Row(
+                    // 四个筛选项横向流式排列：放不下自动换行（窄屏安全）。
+                    // 不设「全部」快捷钮：与四项全选完全等价，不再占位
+                    FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.padding(top = 4.dp)
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        FilterChip(
-                            selected = filterMask == LOG_FILTER_ALL,
-                            onClick = { filterMask = LOG_FILTER_ALL },
-                            label = { Text(stringResource(R.string.guard_log_filter_all)) }
-                        )
                         FilterChip(
                             selected = filterMask and LOG_FILTER_INFO != 0,
                             onClick = { filterMask = filterMask xor LOG_FILTER_INFO },
-                            label = { Text(stringResource(R.string.guard_log_filter_info)) }
+                            label = { Text(stringResource(R.string.guard_level_info)) }
+                        )
+                        FilterChip(
+                            selected = filterMask and LOG_FILTER_WARN != 0,
+                            onClick = { filterMask = filterMask xor LOG_FILTER_WARN },
+                            label = { Text(stringResource(R.string.guard_level_warn)) }
                         )
                         FilterChip(
                             selected = filterMask and LOG_FILTER_ERROR != 0,
                             onClick = { filterMask = filterMask xor LOG_FILTER_ERROR },
-                            label = { Text(stringResource(R.string.guard_log_filter_error)) }
+                            label = { Text(stringResource(R.string.guard_level_error)) }
                         )
                         FilterChip(
                             selected = filterMask and LOG_FILTER_HEAL != 0,
                             onClick = { filterMask = filterMask xor LOG_FILTER_HEAL },
-                            label = { Text(stringResource(R.string.guard_log_filter_heal)) }
+                            label = { Text(stringResource(R.string.guard_level_heal)) }
                         )
                     }
 

@@ -358,8 +358,6 @@
     <string name="guard_verbose_log">記錄成功檢測日誌</string>
     <string name="guard_verbose_log_tip">開啟後每輪線上檢測結果都寫入即時日誌（便於確認守護在正常工作）；關閉則僅記錄異常與自癒事件</string>
     <string name="guard_log_filter_all">全部</string>
-    <string name="guard_log_filter_error">異常</string>
-    <string name="guard_log_filter_heal">自癒</string>
     <string name="guard_log_copied">已複製 %1$d 行日誌</string>
     <string name="guard_log_cleared">日誌已清空</string>
     <string name="guard_log_saved">已儲存: %1$s</string>
@@ -412,7 +410,6 @@
     <string name="guard_action_cmd_connect_tip">Android 11+ 的 cmd wifi connect-network 定向重連目前網路</string>
     <string name="guard_action_wifi_cycle">WiFi 總開關循環（wifi cycle）</string>
     <string name="guard_action_wifi_cycle_tip">終極手段：關閉再開啟 WiFi 總開關，短暫斷開所有 WiFi 活動</string>
-    <string name="guard_log_filter_info">正常</string>
     <string name="guard_log_filter_none">未選擇任何篩選類型</string>
     <string name="guard_level_info">正常</string>
     <string name="guard_level_warn">警告</string>

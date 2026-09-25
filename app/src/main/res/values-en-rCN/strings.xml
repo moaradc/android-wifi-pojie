@@ -359,8 +359,6 @@
     <string name="guard_verbose_log">Log successful checks</string>
     <string name="guard_verbose_log_tip">Write every online check result to the live log (confirm the guard is working); turn off to log errors and healing events only</string>
     <string name="guard_log_filter_all">All</string>
-    <string name="guard_log_filter_error">Errors</string>
-    <string name="guard_log_filter_heal">Healing</string>
     <string name="guard_log_copied">Copied %1$d log lines</string>
     <string name="guard_log_cleared">Log cleared</string>
     <string name="guard_log_saved">Saved: %1$s</string>
@@ -413,7 +411,6 @@
     <string name="guard_action_cmd_connect_tip">Android 11+ cmd wifi connect-network to reconnect to the current SSID</string>
     <string name="guard_action_wifi_cycle">WiFi radio cycle</string>
     <string name="guard_action_wifi_cycle_tip">Last resort: toggles the WiFi radio off and on, briefly drops all WiFi activity</string>
-    <string name="guard_log_filter_info">Normal</string>
     <string name="guard_log_filter_none">No filter type selected</string>
     <string name="guard_level_info">Normal</string>
     <string name="guard_level_warn">Warning</string>
