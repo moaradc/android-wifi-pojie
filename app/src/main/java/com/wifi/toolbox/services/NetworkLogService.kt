@@ -1129,7 +1129,7 @@ private const val FOLD_MIN_RUN = 5
  *   请求清单扇出。
  *
  * 策略（透明可追溯，绝无丢失隐藏）：
- * - 仅折叠签名明确的噪音行（[noisePatterns]，5 类）；
+ * - 仅折叠签名明确的噪音行（[noisePatterns]，6 类）；
  * - 每签名累计 ≥[FOLD_MIN_RUN] 条折叠为一行计数标记
  *   `… folded N repeated lines (签名) …`；短 run 的暂存行按原始顺序原样放行
  *   （跨签名交错也不乱序）；
@@ -1150,6 +1150,8 @@ private class PollingFoldFilter(private val out: (String) -> Unit) {
         Regex("ConnectivityService: HAware B uid") to "ConnectivityService: HAware B uid",
         Regex("WifiService: enforceCanAccessScanResults") to
                 "WifiService: enforceCanAccessScanResults",
+        Regex("WifiService: Permission violation - getScanResults") to
+                "WifiService: Permission violation (getScanResults)",
         Regex("ConnectivityService: sending new Min Network Score") to
                 "ConnectivityService: Min Network Score fan-out"
     )
