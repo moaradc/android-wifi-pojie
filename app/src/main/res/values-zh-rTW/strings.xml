@@ -744,6 +744,10 @@
     <string name="netlog_live_preview">即時事件</string>
     <string name="netlog_preview_empty">暫無事件，開始錄製後此處顯示即時時間軸</string>
     <string name="netlog_preview_count">事件 %1$d 筆（顯示最近 50 筆）</string>
+    <string name="netlog_preview_copied">已複製 %1$d 筆事件</string>
+    <string name="netlog_preview_cleared">已清空即時事件（工作階段檔案不受影響）</string>
+    <string name="netlog_auto_save">自動儲存日誌</string>
+    <string name="netlog_auto_save_tip">記錄時自動將即時事件附加到日誌儲存位置（每天一個檔案，自動保留最近 30 個）</string>
     <string name="netlog_setting_syslog">擷取系統日誌流</string>
     <string name="netlog_setting_syslog_desc">logcat 網路標籤過濾流（WifiService / ConnectivityService / NetworkMonitor 等），需 Shizuku 或 Root 才能讀取系統日誌</string>
     <string name="netlog_setting_snapshot">事件觸發快照</string>

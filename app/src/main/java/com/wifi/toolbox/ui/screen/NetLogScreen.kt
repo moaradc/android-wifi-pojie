@@ -1,8 +1,12 @@
 package com.wifi.toolbox.ui.screen
 
+import android.content.ClipData
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -25,8 +29,11 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.CameraAlt
+import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -48,7 +55,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -58,6 +67,8 @@ import com.wifi.toolbox.R
 import com.wifi.toolbox.services.NetLogState
 import com.wifi.toolbox.services.NetworkLogService
 import com.wifi.toolbox.structs.NetLogSettings
+import com.wifi.toolbox.ui.items.TipIconButton
+import com.wifi.toolbox.utils.GuardLogStore
 import com.wifi.toolbox.utils.NetLogStore
 import com.wifi.toolbox.utils.rememberNetLogSettings
 import java.io.File
@@ -117,6 +128,19 @@ private fun CapturePage(
 ) {
     val context = LocalContext.current
     val running = NetLogState.running
+    val clipboard = LocalClipboardManager.current
+
+    // Toast 用本地状态驱动（组合期间不直接调副作用，与守护实时日志同做法）
+    var toastMsg by remember { mutableStateOf<String?>(null) }
+    fun toast(msg: String) {
+        toastMsg = msg
+    }
+    LaunchedEffect(toastMsg) {
+        toastMsg?.let {
+            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+            toastMsg = null
+        }
+    }
     val eventCount = NetLogState.eventCount
     val logLines = NetLogState.logLines
     val logCapped = NetLogState.logCapped
@@ -278,6 +302,35 @@ private fun CapturePage(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        // 复制 / 清空（图标与长按提示与守护实时日志一致）
+                        TipIconButton(
+                            onClick = {
+                                // 优先复制当前会话的完整时间线（会话结束后仍可复制），
+                                // 无会话文件时回退实时预览缓冲
+                                val text = run {
+                                    val name = NetLogState.sessionName
+                                    if (name.isNotEmpty()) {
+                                        val dir = File(NetLogStore.root(context), name)
+                                        val lines = NetLogStore.readTimelineTail(dir, 10_000)
+                                        if (lines.isNotEmpty()) return@run lines
+                                    }
+                                    NetLogState.previewList()
+                                }
+                                if (text.isEmpty()) return@TipIconButton
+                                clipboard.setText(AnnotatedString(text.joinToString("\n")))
+                                toast(context.getString(R.string.netlog_preview_copied, text.size))
+                            },
+                            tip = stringResource(R.string.guard_log_copy_desc),
+                            icon = Icons.Outlined.ContentCopy
+                        )
+                        TipIconButton(
+                            onClick = {
+                                NetLogState.clearPreview()
+                                toast(context.getString(R.string.netlog_preview_cleared))
+                            },
+                            tip = stringResource(R.string.guard_log_clear_desc),
+                            icon = Icons.Outlined.DeleteSweep
+                        )
                     }
                     Spacer(Modifier.height(8.dp))
                     val preview = NetLogState.previewList()
@@ -363,6 +416,25 @@ private fun SessionsPage(
         NetLogStore.listSessions(context)
     }
 
+    // ---- 日志保存位置（SAF 自选文件夹，与网络守护同机制）----
+    var showLogDirDialog by remember { mutableStateOf(false) }
+    val dirLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                            Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+            } catch (_: Exception) {
+            }
+            onSettingsChange(settings.copy(logDirUri = uri.toString()))
+            showLogDirDialog = false
+        }
+    }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxWidth()
@@ -398,6 +470,30 @@ private fun SessionsPage(
                         subtitle = stringResource(R.string.netlog_setting_probe_desc),
                         checked = settings.probeTimeline
                     ) { onSettingsChange(settings.copy(probeTimeline = it)) }
+
+                    SettingSwitchRow(
+                        title = stringResource(R.string.netlog_auto_save),
+                        subtitle = stringResource(R.string.netlog_auto_save_tip),
+                        checked = settings.autoSaveLog
+                    ) { onSettingsChange(settings.copy(autoSaveLog = it)) }
+
+                    // 日志保存位置：点击弹选择框（默认私有 / SAF 自选文件夹）
+                    val safName = remember(settings.logDirUri) {
+                        GuardLogStore.safDirName(context, settings.logDirUri)
+                    }
+                    val dirDisplay = if (settings.logDirUri.isBlank()) {
+                        stringResource(
+                            R.string.guard_log_dir_private, NetLogStore.root(context).path
+                        )
+                    } else if (safName != null) {
+                        stringResource(R.string.guard_log_dir_custom, safName)
+                    } else {
+                        stringResource(R.string.guard_log_dir_invalid)
+                    }
+                    SettingClickRow(
+                        title = stringResource(R.string.guard_log_dir),
+                        subtitle = dirDisplay
+                    ) { showLogDirDialog = true }
 
                     SettingStepperRow(
                         title = stringResource(R.string.netlog_setting_keep),
@@ -449,6 +545,49 @@ private fun SessionsPage(
         }
 
         item { Spacer(Modifier.height(16.dp)) }
+    }
+
+    // ---- 日志保存位置对话框（结构对齐守护设置页同款对话框）----
+    if (showLogDirDialog) {
+        AlertDialog(
+            onDismissRequest = { showLogDirDialog = false },
+            title = { Text(stringResource(R.string.guard_log_dir)) },
+            text = {
+                Column {
+                    Text(
+                        if (settings.logDirUri.isBlank()) stringResource(
+                            R.string.guard_log_dir_private, NetLogStore.root(context).path
+                        )
+                        else stringResource(
+                            R.string.guard_log_dir_custom,
+                            GuardLogStore.safDirName(context, settings.logDirUri) ?: "?"
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    TextButton(onClick = {
+                        onSettingsChange(settings.copy(logDirUri = ""))
+                        showLogDirDialog = false
+                    }) {
+                        Text(stringResource(R.string.guard_log_dir_use_private))
+                    }
+                    TextButton(onClick = {
+                        try {
+                            dirLauncher.launch(null)
+                        } catch (_: Exception) {
+                        }
+                    }) {
+                        Text(stringResource(R.string.guard_log_dir_pick))
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showLogDirDialog = false }) {
+                    Text(stringResource(R.string.btn_close))
+                }
+            }
+        )
     }
 }
 
@@ -618,6 +757,36 @@ private fun SettingStepperRow(
         Spacer(Modifier.width(6.dp))
         TextButton(onClick = { onValueChange((value - 1).coerceAtLeast(min)) }) { Text("−") }
         TextButton(onClick = { onValueChange((value + 1).coerceAtMost(max)) }) { Text("＋") }
+    }
+}
+
+/** 点击型设置行（保存位置等弹对话框项用；样式与开关/步进行一致） */
+@Composable
+private fun SettingClickRow(
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Icon(
+            Icons.Filled.Folder, null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(16.dp)
+        )
     }
 }
 

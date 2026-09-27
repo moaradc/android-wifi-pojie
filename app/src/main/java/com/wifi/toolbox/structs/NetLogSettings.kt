@@ -28,6 +28,20 @@ data class NetLogSettings(
      */
     val probeTimeline: Boolean = false,
 
+    /**
+     * 日志保存位置（与网络守护同机制）：空 = 应用私有目录（filesDir/netlog，
+     * 会话根目录）；否则为 SAF tree URI（系统文件管理器选择的自选文件夹）。
+     * 自动保存的每日文件写入此位置；SAF 失效时自动回退私有目录。
+     */
+    val logDirUri: String = "",
+
+    /**
+     * 自动保存日志（与网络守护同机制）：记录时自动将实时事件追加到
+     * 日志保存位置（netlog-auto-yyyyMMdd.txt，每天一个，保留最近 30 个）。
+     * 会话本身的完整目录（timeline.jsonl 等）不受此开关影响，始终保存。
+     */
+    val autoSaveLog: Boolean = false,
+
     /** 会话保留个数（超出自动清理最旧的，0 = 不限） */
     val keepSessions: Int = KEEP_SESSIONS_DEFAULT,
 
@@ -45,6 +59,8 @@ data class NetLogSettings(
         const val CAPTURE_SYSTEM_LOG_KEY = "captureSystemLog"
         const val SNAPSHOT_ON_EVENT_KEY = "snapshotOnEvent"
         const val PROBE_TIMELINE_KEY = "probeTimeline"
+        const val LOG_DIR_URI_KEY = "logDirUri"
+        const val AUTO_SAVE_LOG_KEY = "autoSaveLog"
         const val KEEP_SESSIONS_KEY = "keepSessions"
         const val MAX_LOG_MB_KEY = "maxLogMb"
         const val CHANNEL_KEY = "channel"
@@ -62,6 +78,12 @@ data class NetLogSettings(
             ),
             probeTimeline = prefs.getBoolean(
                 PROBE_TIMELINE_KEY, false
+            ),
+            logDirUri = prefs.getString(
+                LOG_DIR_URI_KEY, ""
+            ) ?: "",
+            autoSaveLog = prefs.getBoolean(
+                AUTO_SAVE_LOG_KEY, false
             ),
             keepSessions = prefs.getInt(
                 KEEP_SESSIONS_KEY, KEEP_SESSIONS_DEFAULT

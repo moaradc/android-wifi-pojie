@@ -27,6 +27,7 @@ import com.wifi.toolbox.ToolboxApp
 import com.wifi.toolbox.structs.NetLogSettings
 import com.wifi.toolbox.utils.AidlServiceHelper
 import com.wifi.toolbox.utils.CommandRunner
+import com.wifi.toolbox.utils.GuardLogStore
 import com.wifi.toolbox.utils.NetLogStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -97,6 +98,23 @@ class NetworkLogService : android.app.Service() {
     /** logcat 流重连退避（毫秒）：3s → 6s → 12s → 60s 封顶，EOF 重置到 3s */
     private var logcatReconnectDelay = 3_000L
     private val logcatLineCount = AtomicLong(0)
+
+    /**
+     * logcat 轮询噪音折叠器（会话级，跨流重连保留状态）：
+     * 连续 ≥5 条同型纯轮询行折叠为一条计数标记，详见 [PollingFoldFilter]。
+     */
+    private var logcatFold: PollingFoldFilter? = null
+
+    // ---- 自动保存（与网络守护同机制）----
+    // 以下三个字段仅在 diskExecutor 单线程内读写（时间线落盘与刷写在同
+    // 一队列上串行执行），无需额外同步。
+    /** 自动保存待写缓冲（可读时间线行，换行分隔） */
+    private val autoBuf = StringBuilder()
+    /** 缓冲内行数（避免每次整串数换行的 O(n)） */
+    private var autoPending = 0
+    /** 当前自动文件对应日期（yyyyMMdd），跨天切换文件并清理旧的 */
+    private var autoDay = ""
+    private var autoFlushJob: Job? = null
 
     /** 各网络的上次 VALIDATED 状态（跃迁才记时间线，防 capabilities 高频刷屏） */
     private val lastValidated = HashMap<Network, Boolean>()
@@ -191,6 +209,12 @@ class NetworkLogService : android.app.Service() {
         sessionStartWall = System.currentTimeMillis()
         sessionStartElapsed = SystemClock.elapsedRealtime()
 
+        // 折叠器每会话重建（跨流重连保留），meta 统计与本会话对齐
+        logcatFold = PollingFoldFilter { NetLogStore.appendLogcat(sessionDir!!, it) }
+        autoBuf.setLength(0)
+        autoPending = 0
+        autoDay = ""
+
         NetLogState.running = true
         NetLogState.sessionName = sessionDir!!.name
         NetLogState.startedAt = sessionStartWall
@@ -207,6 +231,16 @@ class NetworkLogService : android.app.Service() {
         )
 
         registerT0Listeners()
+
+        // 自动保存的兜底刷写循环（10s 一拍；关闭开关时 flush 为空操作，
+        // 中途开启也能立即生效）
+        autoFlushJob?.cancel()
+        autoFlushJob = scope.launch {
+            while (isActive && !stopped.get()) {
+                delay(AUTO_FLUSH_INTERVAL_MS)
+                diskExecutor.execute { autoSinkFlush() }
+            }
+        }
 
         if (settings.captureSystemLog) {
             captureBootContextIfBroken()
@@ -229,11 +263,21 @@ class NetworkLogService : android.app.Service() {
         probeJob = null
         snapshotJob?.cancel()
         snapshotJob = null
+        autoFlushJob?.cancel()
+        autoFlushJob = null
 
         val cost = SystemClock.elapsedRealtime() - sessionStartElapsed
         timeline("session", "info", "capture stop · ${cost / 1000}s")
 
+        // 流截断后把折叠器里挂起的尾部冲掉（held 行/计数标记不丢）
+        try {
+            logcatFold?.flush()
+        } catch (_: Exception) {
+        }
+
         // 元数据：设备指纹 + Android 版本 + 通道 + 统计（事后分析必需的上下文）
+        val folded = logcatFold?.foldedCount ?: 0
+        logcatFold = null
         val meta = JSONObject().apply {
             put("device", "${Build.BRAND} ${Build.MODEL}")
             put("android", "Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})")
@@ -243,12 +287,19 @@ class NetworkLogService : android.app.Service() {
             put("durationSec", cost / 1000)
             put("timelineEvents", NetLogState.eventCount)
             put("logcatLines", logcatLineCount.get())
+            put("foldedPollingLines", folded)
             put("logCapped", NetLogState.logCapped)
             put("logTags", LOG_TAGS)
             put("captureSystemLog", settings.captureSystemLog)
             put("snapshotOnEvent", settings.snapshotOnEvent)
             put("probeTimeline", settings.probeTimeline)
+            put("autoSaveLog", settings.autoSaveLog)
         }
+
+        // 自动保存最终落盘（排队在 capture stop 事件之后，保证同队列有序；
+        // onDestroy 的 awaitTermination 会等它执行完）
+        diskExecutor.execute { autoSinkFlush() }
+
         try {
             NetLogStore.writeMeta(dir, meta)
         } catch (_: Exception) {
@@ -462,7 +513,10 @@ class NetworkLogService : android.app.Service() {
         val onLine = Consumer<String> { line ->
             if (stopped.get()) return@Consumer
             try {
-                NetLogStore.appendLogcat(dir, line)
+                // 纯轮询噪音行（getConnectionInfo 高频轮询等）经折叠器：
+                // 连续 ≥5 条同型折叠为一行计数标记，短串原样放行（见
+                // PollingFoldFilter）；计数与封顶检查仍按接收行数计
+                logcatFold?.feed(line) ?: NetLogStore.appendLogcat(dir, line)
                 val n = logcatLineCount.incrementAndGet()
                 NetLogState.logLines = n.toInt()
                 // 大小封顶检查（每 200 行一次，避免每行查文件长度）
@@ -475,6 +529,10 @@ class NetworkLogService : android.app.Service() {
                             "logcat", "warn",
                             "size cap reached (${NetLogStore.formatSize(size)}), stream stopped"
                         )
+                        try {
+                            logcatFold?.flush()
+                        } catch (_: Exception) {
+                        }
                         logcatCancel?.run()
                         logcatCancel = null
                     }
@@ -485,6 +543,10 @@ class NetworkLogService : android.app.Service() {
 
         val onFinish = Consumer<CommandRunner.CommandResult> {
             logcatRunning.set(false)
+            try {
+                logcatFold?.flush()
+            } catch (_: Exception) {
+            }
             if (stopped.get() || sessionDir == null || NetLogState.logCapped) return@Consumer
             // EOF = Shizuku 重启/进程被杀：记 GAP 后退避重连
             val gapSec = logcatReconnectDelay / 1000
@@ -745,14 +807,14 @@ class NetworkLogService : android.app.Service() {
             put("msg", msg)
         }
         val json = line.toString()
+        val readable = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(wall)) +
+                " [$src] $msg"
         diskExecutor.execute {
             NetLogStore.appendTimeline(dir, json)
+            autoSinkAppend(readable)
         }
         NetLogState.eventCount++
-        NetLogState.addPreview(
-            SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(wall)) +
-                    " [$src] $msg"
-        )
+        NetLogState.addPreview(readable)
         // 通知数字每 5 个事件刷一次（避免高频事件拖垮通知服务）
         if (NetLogState.eventCount % 5 == 1) {
             mainHandler.post { updateNotification() }
@@ -761,6 +823,77 @@ class NetworkLogService : android.app.Service() {
 
     private fun now(): String =
         SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).format(Date())
+
+    // ==================== 自动保存（与网络守护同机制） ====================
+
+    /**
+     * 自动保存入口（仅 diskExecutor 单线程调用）：可读时间线行进入缓冲，
+     * 满 [AUTO_FLUSH_LINES] 行或跨天时刷盘。开关中途关闭时清空缓冲丢弃
+     * 待写行（会话目录 timeline.jsonl 始终完整，不依赖此开关）。
+     */
+    private fun autoSinkAppend(readable: String) {
+        if (!settings.autoSaveLog) {
+            if (autoPending > 0) {
+                autoBuf.setLength(0)
+                autoPending = 0
+            }
+            return
+        }
+        val day = SimpleDateFormat("yyyyMMdd", Locale.US).format(Date())
+        if (day != autoDay) {
+            autoSinkFlush()   // 先把昨天的尾巴落进昨天的文件
+            autoDay = day
+            pruneAutoFiles()
+        }
+        autoBuf.append(readable).append('\n')
+        autoPending++
+        if (autoPending >= AUTO_FLUSH_LINES) {
+            autoSinkFlush()
+        }
+    }
+
+    /**
+     * 缓冲刷盘：写入日志保存位置（SAF 优先，失效回退私有会话根目录）。
+     * 失败保留缓冲下轮重试；缓冲超限（极端：磁盘满）丢弃防内存增长。
+     */
+    private fun autoSinkFlush() {
+        if (autoPending == 0) return
+        if (!settings.autoSaveLog) {
+            autoBuf.setLength(0)
+            autoPending = 0
+            return
+        }
+        val day = autoDay.ifEmpty {
+            SimpleDateFormat("yyyyMMdd", Locale.US).format(Date())
+        }
+        val ok = try {
+            GuardLogStore.append(
+                this, settings.logDirUri,
+                "netlog-auto-$day.txt", autoBuf.toString(),
+                fallbackDir = NetLogStore.root(this)
+            )
+        } catch (_: Exception) {
+            false
+        }
+        if (ok || autoPending > AUTO_BUFFER_MAX_LINES) {
+            autoBuf.setLength(0)
+            autoPending = 0
+        }
+    }
+
+    /** 自动保存文件只保留最近 [AUTO_SAVE_KEEP] 个（跨天时触发，两位置一并统计） */
+    private fun pruneAutoFiles() {
+        try {
+            val files = GuardLogStore.list(
+                this, settings.logDirUri, privateRoot = NetLogStore.root(this)
+            ).filter { it.name.startsWith("netlog-auto-") }
+            if (files.size > AUTO_SAVE_KEEP) {
+                files.drop(AUTO_SAVE_KEEP).forEach { GuardLogStore.delete(this, it) }
+            }
+        } catch (_: Exception) {
+        }
+    }
+
 
     private fun startAsForeground() {
         createChannel()
@@ -900,6 +1033,18 @@ class NetworkLogService : android.app.Service() {
         private const val RSSI_MAX_INTERVAL_MS = 60_000L
         private const val RSSI_CRITICAL = -80
 
+        /** 自动保存兜底刷写周期（事件少时也最多 10s 落一次盘） */
+        private const val AUTO_FLUSH_INTERVAL_MS = 10_000L
+
+        /** 自动保存缓冲行数阈值（满则刷盘） */
+        private const val AUTO_FLUSH_LINES = 20
+
+        /** 自动保存文件保留个数（netlog-auto-*.txt，跨天清理，与守护一致） */
+        private const val AUTO_SAVE_KEEP = 30
+
+        /** 自动保存缓冲上限（写入持续失败时丢弃缓冲防内存增长） */
+        private const val AUTO_BUFFER_MAX_LINES = 4_000
+
         /** supplicant 握手关键步（防刷屏白名单） */
         private val SUPPLICANT_KEY_STATES = setOf(
             android.net.wifi.SupplicantState.ASSOCIATING,
@@ -966,4 +1111,84 @@ private object ShizukuUtilCompat {
         onLine: Consumer<String>,
         onFinish: Consumer<CommandRunner.CommandResult>
     ): Runnable = com.wifi.toolbox.utils.ShizukuUtil.executeCommand(command, onLine, onFinish)
+}
+
+/** 轮询噪音折叠阈值：连续 ≥5 条同型纯轮询行才折叠，短串原样放行 */
+private const val FOLD_MIN_RUN = 5
+
+/**
+ * logcat 纯轮询噪音折叠器（真机验证结论：WifiService: getConnectionInfo
+ * 等系统轮询行可占日志流约七成，且对网络诊断零价值——同一位置权限轮询
+ * 每秒刷数十行，把真正的网络事件淹没）。
+ *
+ * 策略（透明可追溯，绝无丢失隐藏）：
+ * - 仅折叠两类签名明确的纯轮询行（[noisePatterns]）；
+ * - 连续 ≥[FOLD_MIN_RUN] 条同型才折叠，替换为一行计数标记
+ *   `… folded N repeated lines (签名) …`；短于阈值原样放行（不丢任何零星行）；
+ * - 不同签名的行或真实事件行出现即冲刷当前 run，折叠状态不跨行携带；
+ * - 会话 meta.json 记录 foldedPollingLines 供事后核对。
+ *
+ * 非线程安全：logcat 流回调单线程调用（Shizuku 流式回调串行），调用方
+ * 需在流结束/会话停止时显式 [flush] 冲掉挂起的尾部 run。
+ *
+ * @param out 放行行（含折叠标记行）的写出回调
+ */
+private class PollingFoldFilter(private val out: (String) -> Unit) {
+
+    /** 噪音签名：正则 → 展示名（标记行里可读） */
+    private val noisePatterns = listOf(
+        Regex("WifiService: getConnectionInfo, uid =") to "WifiService: getConnectionInfo",
+        Regex("ConnectivityService: B uid \\d+") to "ConnectivityService: B uid"
+    )
+
+    /** 当前 run 的签名展示名；null = 不在噪音 run 中 */
+    private var runTag: String? = null
+
+    /** 当前 run 已接收行数 */
+    private var runCount = 0
+
+    /** run 前几行原文暂存（< FOLD_MIN_RUN 时原样放行用） */
+    private val held = mutableListOf<String>()
+
+    /** 本流累计折叠掉的行数（meta 统计） */
+    var foldedCount = 0
+        private set
+
+    fun feed(line: String) {
+        val tag = noisePatterns.firstOrNull { it.first.containsMatchIn(line) }?.second
+        if (tag == null) {
+            flushRun()
+            out(line)
+            return
+        }
+        if (runTag != tag) {
+            flushRun()
+            runTag = tag
+            runCount = 1
+            held.clear()
+            held.add(line)
+            return
+        }
+        runCount++
+        if (held.size < FOLD_MIN_RUN - 1) held.add(line)
+        // 超出暂存量的重复行仅计数（写盘只剩一行标记）
+    }
+
+    /** 冲刷当前 run：达阈值折叠成标记行，未达标原样放行暂存行 */
+    fun flush() {
+        flushRun()
+    }
+
+    private fun flushRun() {
+        val tag = runTag ?: return
+        if (runCount >= FOLD_MIN_RUN) {
+            out("… folded $runCount repeated lines ($tag) …")
+            foldedCount += runCount
+        } else {
+            held.forEach(out)
+        }
+        runTag = null
+        runCount = 0
+        held.clear()
+    }
 }

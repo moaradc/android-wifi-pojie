@@ -8,7 +8,11 @@
   - 主动探测时间线（可选，默认关）：每 15s HTTP+DNS 双探测记录定量「通/不通」曲线
   - 会话管理：历史会话列表（元数据/大小/时间线尾部预览）、一键分享 zip（FileProvider）、自动轮转（保留个数可配 0-50）；立即快照按钮（会话中随时手动抓一轮）
   - 通道选择独立于网络守护的执行通道（互不干扰），设置热加载无需重启会话；通知含实时事件计数与停止按钮
-- 已知限制（真机待验证）：dumpsys 各子命令字段因 ROM 而异（MIUI/HyperOS 可能裁剪 dnsresolver 统计）；本地 Shell 通道下系统日志流为空属预期（已如实标注）；该功能不捕获其他 App 内部行为（应用视角只能靠探测时间线间接佐证）
+- 真机验证（WIKO JEY-AN00 · Android 11 · Shizuku 通道）：全机制跑通——时间线 12 事件、logcat 流 333 行、双快照（net-available 事件触发 + manual 手动）各 1.6MB 六命令段全部执行、RSSI 防抖生效；预判的 ROM 差异如实兑现：华为系 ROM 无 dnsresolver 服务（命令输出 Can't find service，非崩溃）；定位服务关闭时系统不返回真实 SSID（Android 9+ 隐私策略）
+- 优化：logcat 纯轮询噪音折叠（真机实测 29s 会话 333 行中约七成是 WifiService: getConnectionInfo 同型轮询行，真实网络事件被淹没）——仅折叠两类签名明确的纯轮询行（WifiService: getConnectionInfo / ConnectivityService: B uid），连续 ≥5 条同型折叠为一行计数标记（`… folded N repeated lines (签名) …`），短串零星行原样放行；折叠器跨流重连保留状态、会话停止时冲刷尾部；meta.json 新增 foldedPollingLines 供事后核对（logcatLines 仍按接收行数计）；计数标记透明可追溯，真实事件行绝无隐藏
+- 新增：网络日志「日志保存位置」与「自动保存日志」（与网络守护同机制）——设置页新增两项：保存位置默认应用私有目录（filesDir/netlog 会话根目录），可选 SAF 自选文件夹（系统文件管理器授权，失效自动回退私有目录）；自动保存开启后记录时将实时事件以可读格式追加到保存位置（netlog-auto-yyyyMMdd.txt 每天一个，自动保留最近 30 个，跨天自动清理），缓冲 20 行/10s 双阈值刷盘，会话停止最终落盘；会话目录本身（timeline.jsonl 等）不受开关影响始终完整保存
+- 新增：实时事件卡「复制」「清空」按钮（图标与长按提示与守护实时日志一致）——复制优先取当前会话完整时间线（会话结束后仍可复制，最多 1 万行，无会话文件时回退实时预览缓冲），清空仅清实时预览缓冲（会话文件不受影响，均有 Toast 反馈）
+- 版本：保持 v3.0.0_Alpha-004 / versionCode 10 不变（按要求）
 
 # v3.0.0_Alpha-003
 

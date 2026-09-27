@@ -30,6 +30,8 @@ fun rememberNetLogSettings(context: Context): MutableState<NetLogSettings> {
                         putBoolean(NetLogSettings.CAPTURE_SYSTEM_LOG_KEY, s.captureSystemLog)
                         putBoolean(NetLogSettings.SNAPSHOT_ON_EVENT_KEY, s.snapshotOnEvent)
                         putBoolean(NetLogSettings.PROBE_TIMELINE_KEY, s.probeTimeline)
+                        putString(NetLogSettings.LOG_DIR_URI_KEY, s.logDirUri)
+                        putBoolean(NetLogSettings.AUTO_SAVE_LOG_KEY, s.autoSaveLog)
                         putInt(NetLogSettings.KEEP_SESSIONS_KEY, s.keepSessions)
                         putInt(NetLogSettings.MAX_LOG_MB_KEY, s.maxLogMb)
                         putInt(NetLogSettings.CHANNEL_KEY, s.channel)

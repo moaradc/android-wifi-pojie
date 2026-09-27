@@ -744,6 +744,10 @@
     <string name="netlog_live_preview">Live events</string>
     <string name="netlog_preview_empty">No events yet; the live timeline appears here after capture starts</string>
     <string name="netlog_preview_count">%1$d events (last 50 shown)</string>
+    <string name="netlog_preview_copied">Copied %1$d events</string>
+    <string name="netlog_preview_cleared">Live events cleared (session files unaffected)</string>
+    <string name="netlog_auto_save">Auto-save log</string>
+    <string name="netlog_auto_save_tip">While recording, live events are appended automatically to the log save location (one file per day, newest 30 kept)</string>
     <string name="netlog_setting_syslog">Capture system log stream</string>
     <string name="netlog_setting_syslog_desc">Filtered logcat stream of network tags (WifiService / ConnectivityService / NetworkMonitor, etc.); Shizuku or Root required to read system logs</string>
     <string name="netlog_setting_snapshot">Event-triggered snapshots</string>

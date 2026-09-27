@@ -744,6 +744,10 @@
     <string name="netlog_live_preview">即時諸事</string>
     <string name="netlog_preview_empty">尚無事焉，始錄之後此處自見時序</string>
     <string name="netlog_preview_count">事凡 %1$d（示其末五十）</string>
+    <string name="netlog_preview_copied">已複製 %1$d 筆事件</string>
+    <string name="netlog_preview_cleared">已清空即時事件（會話檔案不受影響）</string>
+    <string name="netlog_auto_save">自動存錄</string>
+    <string name="netlog_auto_save_tip">記錄時自動存錄即時事件至日誌儲存位置（每日一檔，留近 30 檔）</string>
     <string name="netlog_setting_syslog">錄系統誌流</string>
     <string name="netlog_setting_syslog_desc">擇網絡諸標籤之誌流（WifiService / ConnectivityService / NetworkMonitor 諸類），欲讀系統之誌，須 Shizuku 或 Root</string>
     <string name="netlog_setting_snapshot">事發留影</string>

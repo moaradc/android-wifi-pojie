@@ -92,9 +92,17 @@ object GuardLogStore {
      * - SAF：优先 openOutputStream(uri, "wa") 追加模式；个别 provider 不支持时
      *   回退「读已有内容 + 整体重写」；SAF 不可写时回退私有目录
      * - 私有目录：File.appendText
+     * @param fallbackDir SAF 不可写时的私有回退目录（默认守护的 filesDir/log；
+     *   网络日志复用本方法时传自己的会话根目录，避免两类日志混放）
      * @return 是否成功
      */
-    fun append(context: Context, uriStr: String, fileName: String, content: String): Boolean {
+    fun append(
+        context: Context,
+        uriStr: String,
+        fileName: String,
+        content: String,
+        fallbackDir: File = privateDir(context)
+    ): Boolean {
         if (content.isEmpty()) return false
         val saf = safDir(context, uriStr)
         if (saf != null) {
@@ -135,18 +143,27 @@ object GuardLogStore {
             }
         }
         return try {
-            File(privateDir(context), fileName).appendText(content)
+            fallbackDir.mkdirs()
+            File(fallbackDir, fileName).appendText(content)
             true
         } catch (_: Exception) {
             false
         }
     }
 
-    /** 列出两个位置的全部日志（时间倒序；含已失效 SAF 之外的私有目录文件） */
-    fun list(context: Context, uriStr: String): List<StoredLogFile> {
+    /**
+     * 列出两个位置的全部日志（时间倒序；含已失效 SAF 之外的私有目录文件）。
+     * @param privateRoot 私有目录来源（默认守护的 filesDir/log；网络日志
+     *   复用本方法做自动文件清理时传自己的会话根目录）
+     */
+    fun list(
+        context: Context,
+        uriStr: String,
+        privateRoot: File = privateDir(context)
+    ): List<StoredLogFile> {
         val out = mutableListOf<StoredLogFile>()
         try {
-            privateDir(context).listFiles()
+            privateRoot.listFiles()
                 ?.filter { it.isFile }
                 ?.forEach {
                     out += StoredLogFile(
