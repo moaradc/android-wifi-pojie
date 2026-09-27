@@ -100,8 +100,9 @@ class NetworkLogService : android.app.Service() {
     private val logcatLineCount = AtomicLong(0)
 
     /**
-     * logcat 轮询噪音折叠器（会话级，跨流重连保留状态）：
-     * 连续 ≥5 条同型纯轮询行折叠为一条计数标记，详见 [PollingFoldFilter]。
+     * logcat 冗余噪音折叠器（会话级，跨流重连保留状态）：按签名并行计数
+     * （成对交错的轮询行互不冲刷），每签名累计 ≥5 条折叠为一条计数标记，
+     * 详见 [PollingFoldFilter]。
      */
     private var logcatFold: PollingFoldFilter? = null
 
@@ -1117,15 +1118,22 @@ private object ShizukuUtilCompat {
 private const val FOLD_MIN_RUN = 5
 
 /**
- * logcat 纯轮询噪音折叠器（真机验证结论：WifiService: getConnectionInfo
- * 等系统轮询行可占日志流约七成，且对网络诊断零价值——同一位置权限轮询
- * 每秒刷数十行，把真正的网络事件淹没）。
+ * logcat 冗余噪音折叠器（真机验证两轮迭代）：
+ * - 纯轮询行（WifiService: getConnectionInfo 等）可占日志流约七成；
+ * - 华为系 ROM 的轮询行成对交错出现（getConnectionInfo ↔ enforceCanAccess
+ *   拒绝行、B uid ↔ HAware B uid 状态行），单签名串行 run 检测互相冲刷、
+ *   谁都到不了折叠阈值 → 本实现按签名并行计数，交错不冲刷；
+ * - 评分扇出行（sending new Min Network Score）单次评分变化向全部网络请求
+ *   重复播报约 40 行、每次 RSSI 变化重播一遍（真机 25s 会话占 52%）——
+ *   评分变化本身（updateNetworkScore to N）始终原样放行，仅折叠重复的
+ *   请求清单扇出。
  *
  * 策略（透明可追溯，绝无丢失隐藏）：
- * - 仅折叠两类签名明确的纯轮询行（[noisePatterns]）；
- * - 连续 ≥[FOLD_MIN_RUN] 条同型才折叠，替换为一行计数标记
- *   `… folded N repeated lines (签名) …`；短于阈值原样放行（不丢任何零星行）；
- * - 不同签名的行或真实事件行出现即冲刷当前 run，折叠状态不跨行携带；
+ * - 仅折叠签名明确的噪音行（[noisePatterns]，5 类）；
+ * - 每签名累计 ≥[FOLD_MIN_RUN] 条折叠为一行计数标记
+ *   `… folded N repeated lines (签名) …`；短 run 的暂存行按原始顺序原样放行
+ *   （跨签名交错也不乱序）；
+ * - 真实事件行出现时冲刷全部挂起 run，折叠状态不跨行携带；
  * - 会话 meta.json 记录 foldedPollingLines 供事后核对。
  *
  * 非线程安全：logcat 流回调单线程调用（Shizuku 流式回调串行），调用方
@@ -1138,17 +1146,19 @@ private class PollingFoldFilter(private val out: (String) -> Unit) {
     /** 噪音签名：正则 → 展示名（标记行里可读） */
     private val noisePatterns = listOf(
         Regex("WifiService: getConnectionInfo, uid =") to "WifiService: getConnectionInfo",
-        Regex("ConnectivityService: B uid \\d+") to "ConnectivityService: B uid"
+        Regex("ConnectivityService: B uid \\d+") to "ConnectivityService: B uid",
+        Regex("ConnectivityService: HAware B uid") to "ConnectivityService: HAware B uid",
+        Regex("WifiService: enforceCanAccessScanResults") to
+                "WifiService: enforceCanAccessScanResults",
+        Regex("ConnectivityService: sending new Min Network Score") to
+                "ConnectivityService: Min Network Score fan-out"
     )
 
-    /** 当前 run 的签名展示名；null = 不在噪音 run 中 */
-    private var runTag: String? = null
+    /** 各签名当前 run 的计数（key = 展示名；并行计数，交错不冲刷） */
+    private val runCounts = LinkedHashMap<String, Int>()
 
-    /** 当前 run 已接收行数 */
-    private var runCount = 0
-
-    /** run 前几行原文暂存（< FOLD_MIN_RUN 时原样放行用） */
-    private val held = mutableListOf<String>()
+    /** 短 run 暂存行（签名, 原文）——单一有序列表，放行时不乱序 */
+    private val held = mutableListOf<Pair<String, String>>()
 
     /** 本流累计折叠掉的行数（meta 统计） */
     var foldedCount = 0
@@ -1157,38 +1167,34 @@ private class PollingFoldFilter(private val out: (String) -> Unit) {
     fun feed(line: String) {
         val tag = noisePatterns.firstOrNull { it.first.containsMatchIn(line) }?.second
         if (tag == null) {
-            flushRun()
+            flushRuns()
             out(line)
             return
         }
-        if (runTag != tag) {
-            flushRun()
-            runTag = tag
-            runCount = 1
-            held.clear()
-            held.add(line)
-            return
+        runCounts[tag] = (runCounts[tag] ?: 0) + 1
+        // 每签名最多暂存 FOLD_MIN_RUN-1 行（短 run 放行上限；多出的仅计数）
+        if (held.count { it.first == tag } < FOLD_MIN_RUN - 1) {
+            held.add(tag to line)
         }
-        runCount++
-        if (held.size < FOLD_MIN_RUN - 1) held.add(line)
-        // 超出暂存量的重复行仅计数（写盘只剩一行标记）
     }
 
-    /** 冲刷当前 run：达阈值折叠成标记行，未达标原样放行暂存行 */
+    /** 冲刷全部挂起 run：达阈值出折叠标记，未达标暂存行按原序放行 */
     fun flush() {
-        flushRun()
+        flushRuns()
     }
 
-    private fun flushRun() {
-        val tag = runTag ?: return
-        if (runCount >= FOLD_MIN_RUN) {
-            out("… folded $runCount repeated lines ($tag) …")
-            foldedCount += runCount
-        } else {
-            held.forEach(out)
+    private fun flushRuns() {
+        if (runCounts.isEmpty()) return
+        runCounts.forEach { (tag, n) ->
+            if (n >= FOLD_MIN_RUN) {
+                out("… folded $n repeated lines ($tag) …")
+                foldedCount += n
+            }
         }
-        runTag = null
-        runCount = 0
+        held.forEach { (tag, line) ->
+            if ((runCounts[tag] ?: 0) < FOLD_MIN_RUN) out(line)
+        }
+        runCounts.clear()
         held.clear()
     }
 }
