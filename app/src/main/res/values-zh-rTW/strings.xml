@@ -726,4 +726,43 @@
     <string name="storage_clean_selected">清理所選</string>
     <string name="storage_clean_done">已清理 %1$s</string>
     <string name="storage_nothing">沒有可清理的內容</string>
+
+    <!-- ==================== 網路日誌（獨立擷取功能） ==================== -->
+    <string name="netlog_name">網路日誌</string>
+    <string name="netlog_tab_capture">擷取</string>
+    <string name="netlog_tab_sessions">工作階段</string>
+    <string name="netlog_recording">錄製中</string>
+    <string name="netlog_stopped">未錄製</string>
+    <string name="netlog_start">開始錄製</string>
+    <string name="netlog_stop">停止錄製</string>
+    <string name="netlog_snapshot_now">立即快照</string>
+    <string name="netlog_hint">開始後，鏈路事件、系統日誌與狀態快照將自動擷取</string>
+    <string name="netlog_duration_events">已錄製 %1$s · 事件 %2$d</string>
+    <string name="netlog_channel_label">執行通道</string>
+    <string name="netlog_logcat_lines">日誌行數</string>
+    <string name="netlog_log_capped">日誌已達上限已停止（共 %1$d 行）</string>
+    <string name="netlog_live_preview">即時事件</string>
+    <string name="netlog_preview_empty">暫無事件，開始錄製後此處顯示即時時間軸</string>
+    <string name="netlog_preview_count">事件 %1$d 筆（顯示最近 50 筆）</string>
+    <string name="netlog_setting_syslog">擷取系統日誌流</string>
+    <string name="netlog_setting_syslog_desc">logcat 網路標籤過濾流（WifiService / ConnectivityService / NetworkMonitor 等），需 Shizuku 或 Root 才能讀取系統日誌</string>
+    <string name="netlog_setting_snapshot">事件觸發快照</string>
+    <string name="netlog_setting_snapshot_desc">斷鏈/恢復等事件發生時自動抓取 dumpsys 與介面狀態存檔</string>
+    <string name="netlog_setting_probe">主動探測時間軸</string>
+    <string name="netlog_setting_probe_desc">每 15 秒 HTTP+DNS 輪詢一次並記錄結果（預設關閉）</string>
+    <string name="netlog_setting_keep">工作階段保留個數</string>
+    <string name="netlog_setting_keep_desc">超出自動清理最舊的工作階段</string>
+    <string name="netlog_setting_maxlog">單一工作階段日誌上限</string>
+    <string name="netlog_setting_maxlog_desc">日誌流達到該大小後停止擷取（防止占滿磁碟）</string>
+    <string name="netlog_unlimited">不限</string>
+    <string name="netlog_unit_sessions">個</string>
+    <string name="netlog_sessions_title">歷史工作階段（%1$d）</string>
+    <string name="netlog_sessions_empty">暫無歷史工作階段</string>
+    <string name="netlog_session_share">分享工作階段</string>
+    <string name="netlog_session_delete">刪除工作階段</string>
+    <string name="netlog_notif_channel">網路日誌</string>
+    <string name="netlog_notif_channel_desc">網路日誌錄製狀態通知</string>
+    <string name="netlog_notif_title">網路日誌錄製中</string>
+    <string name="netlog_notif_text">事件 %1$d · 點擊查看</string>
+    <string name="netlog_notif_stop">停止</string>
 </resources>

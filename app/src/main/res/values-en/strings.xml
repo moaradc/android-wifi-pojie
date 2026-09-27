@@ -726,4 +726,43 @@
     <string name="storage_clean_selected">Clear selected</string>
     <string name="storage_clean_done">Freed %1$s</string>
     <string name="storage_nothing">Nothing to clear</string>
+
+    <!-- ==================== Network Log (standalone capture) ==================== -->
+    <string name="netlog_name">Network Log</string>
+    <string name="netlog_tab_capture">Capture</string>
+    <string name="netlog_tab_sessions">Sessions</string>
+    <string name="netlog_recording">Recording</string>
+    <string name="netlog_stopped">Not recording</string>
+    <string name="netlog_start">Start capture</string>
+    <string name="netlog_stop">Stop capture</string>
+    <string name="netlog_snapshot_now">Snapshot now</string>
+    <string name="netlog_hint">Once started, link events, system logs and state snapshots are captured automatically</string>
+    <string name="netlog_duration_events">Recorded %1$s · %2$d events</string>
+    <string name="netlog_channel_label">Channel</string>
+    <string name="netlog_logcat_lines">Log lines</string>
+    <string name="netlog_log_capped">Log limit reached, stream stopped (%1$d lines)</string>
+    <string name="netlog_live_preview">Live events</string>
+    <string name="netlog_preview_empty">No events yet; the live timeline appears here after capture starts</string>
+    <string name="netlog_preview_count">%1$d events (last 50 shown)</string>
+    <string name="netlog_setting_syslog">Capture system log stream</string>
+    <string name="netlog_setting_syslog_desc">Filtered logcat stream of network tags (WifiService / ConnectivityService / NetworkMonitor, etc.); Shizuku or Root required to read system logs</string>
+    <string name="netlog_setting_snapshot">Event-triggered snapshots</string>
+    <string name="netlog_setting_snapshot_desc">Automatically grab dumpsys and interface state archives when events like link loss/recovery occur</string>
+    <string name="netlog_setting_probe">Active probe timeline</string>
+    <string name="netlog_setting_probe_desc">HTTP+DNS polling every 15 seconds with results recorded (off by default)</string>
+    <string name="netlog_setting_keep">Sessions to keep</string>
+    <string name="netlog_setting_keep_desc">Oldest sessions are cleaned automatically beyond this count</string>
+    <string name="netlog_setting_maxlog">Per-session log cap</string>
+    <string name="netlog_setting_maxlog_desc">Log stream stops after reaching this size (protects disk space)</string>
+    <string name="netlog_unlimited">Unlimited</string>
+    <string name="netlog_unit_sessions">sessions</string>
+    <string name="netlog_sessions_title">Past sessions (%1$d)</string>
+    <string name="netlog_sessions_empty">No past sessions</string>
+    <string name="netlog_session_share">Share session</string>
+    <string name="netlog_session_delete">Delete session</string>
+    <string name="netlog_notif_channel">Network Log</string>
+    <string name="netlog_notif_channel_desc">Network log recording status notification</string>
+    <string name="netlog_notif_title">Network log recording</string>
+    <string name="netlog_notif_text">%1$d events · tap to view</string>
+    <string name="netlog_notif_stop">Stop</string>
 </resources>

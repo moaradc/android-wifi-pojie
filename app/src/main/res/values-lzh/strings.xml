@@ -726,4 +726,43 @@
     <string name="storage_clean_selected">依选而扫</string>
     <string name="storage_clean_done">已扫 %1$s</string>
     <string name="storage_nothing">府库洁净，无可扫者</string>
+
+    <!-- ==================== 網絡日誌（獨立捕獲功能） ==================== -->
+    <string name="netlog_name">網絡日誌</string>
+    <string name="netlog_tab_capture">捕獲</string>
+    <string name="netlog_tab_sessions">會話</string>
+    <string name="netlog_recording">方錄之中</string>
+    <string name="netlog_stopped">未嘗錄也</string>
+    <string name="netlog_start">始錄</string>
+    <string name="netlog_stop">止錄</string>
+    <string name="netlog_snapshot_now">即刻留影</string>
+    <string name="netlog_hint">既始，鏈路之變、系統之誌、狀態之影，皆自錄焉</string>
+    <string name="netlog_duration_events">錄 %1$s · 事 %2$d</string>
+    <string name="netlog_channel_label">行道</string>
+    <string name="netlog_logcat_lines">誌行數</string>
+    <string name="netlog_log_capped">誌已盈限，流遂止矣（凡 %1$d 行）</string>
+    <string name="netlog_live_preview">即時諸事</string>
+    <string name="netlog_preview_empty">尚無事焉，始錄之後此處自見時序</string>
+    <string name="netlog_preview_count">事凡 %1$d（示其末五十）</string>
+    <string name="netlog_setting_syslog">錄系統誌流</string>
+    <string name="netlog_setting_syslog_desc">擇網絡諸標籤之誌流（WifiService / ConnectivityService / NetworkMonitor 諸類），欲讀系統之誌，須 Shizuku 或 Root</string>
+    <string name="netlog_setting_snapshot">事發留影</string>
+    <string name="netlog_setting_snapshot_desc">鏈路斷絕復續之際，自取 dumpsys 與接口之狀以存</string>
+    <string name="netlog_setting_probe">自遣探測</string>
+    <string name="netlog_setting_probe_desc">每十五秒以 HTTP+DNS 探之而錄其果（默不啟用）</string>
+    <string name="netlog_setting_keep">存會話之數</string>
+    <string name="netlog_setting_keep_desc">逾數則自動清除至舊者</string>
+    <string name="netlog_setting_maxlog">一會話誌之上限</string>
+    <string name="netlog_setting_maxlog_desc">誌流盈此即止（防盤之滿）</string>
+    <string name="netlog_unlimited">不限</string>
+    <string name="netlog_unit_sessions">枚</string>
+    <string name="netlog_sessions_title">往昔會話（%1$d）</string>
+    <string name="netlog_sessions_empty">未嘗有會話</string>
+    <string name="netlog_session_share">分此會話</string>
+    <string name="netlog_session_delete">刪此會話</string>
+    <string name="netlog_notif_channel">網絡日誌</string>
+    <string name="netlog_notif_channel_desc">網絡日誌錄製之狀告</string>
+    <string name="netlog_notif_title">網絡日誌錄中</string>
+    <string name="netlog_notif_text">事 %1$d · 點而視之</string>
+    <string name="netlog_notif_stop">止</string>
 </resources>

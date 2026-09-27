@@ -1,3 +1,15 @@
+# v3.0.0_Alpha-004
+
+- 新增：网络日志（独立捕获功能）——工具箱抽屉新增「网络日志」入口，纯观察设计（绝不执行任何改变网络状态的命令），完整记录一次网络故障的前因后果：
+  - 统一时间线（timeline.jsonl）：双时钟戳（wall + elapsedRealtime，用户改系统时间后仍可对齐），覆盖系统网络回调（AVAILABLE/LOSING/LOST/VALIDATED 能力跃迁）、WiFi 状态广播（连接/断开/supplicant 四次握手关键步）、RSSI 跳变（防抖过滤）、屏幕亮灭（后台冻结类问题的背景标注）
+  - 系统日志流（logcat_network.txt）：logcat 长驻过滤流，12 个网络标签（WifiService / WifiClientModeImpl / ConnectivityService / NetworkMonitor / DhcpClient / wpa_supplicant / netd / dnsresolver 等），经 Shizuku（uid2000）或 Root AIDL 读取；本地 Shell 降级时如实记录（普通应用无 READ_LOGS）；EOF 断流指数退避重连（成功后重置）；单会话大小封顶防塞满磁盘
+  - 事件触发快照（snapshots/）：断链/恢复等事件发生瞬间并发抓取只读命令组（dumpsys connectivity / dumpsys wifi / dumpsys dnsresolver / ip addr / ip route / dumpsys netstats），5s 防抖合并——故障瞬间的系统内部状态只在内存里存活几秒，快照要抢在它过期前留存
+  - 断链现场存档：开始记录时若 WiFi 已断开（故障进行中才想起开日志的场景），自动回填 logcat 最近 800 行作为现场
+  - 主动探测时间线（可选，默认关）：每 15s HTTP+DNS 双探测记录定量「通/不通」曲线
+  - 会话管理：历史会话列表（元数据/大小/时间线尾部预览）、一键分享 zip（FileProvider）、自动轮转（保留个数可配 0-50）；立即快照按钮（会话中随时手动抓一轮）
+  - 通道选择独立于网络守护的执行通道（互不干扰），设置热加载无需重启会话；通知含实时事件计数与停止按钮
+- 已知限制（真机待验证）：dumpsys 各子命令字段因 ROM 而异（MIUI/HyperOS 可能裁剪 dnsresolver 统计）；本地 Shell 通道下系统日志流为空属预期（已如实标注）；该功能不捕获其他 App 内部行为（应用视角只能靠探测时间线间接佐证）
+
 # v3.0.0_Alpha-003
 
 - 精简：实时日志筛选移除「全部」快捷钮（用户反馈：与四项全选完全等价，占位冗余）——「正常/警告/错误/自愈」四项全选即全部语义（默认仍四项全开），全不选保留「未选择任何筛选类型」空态；设置页「记录日志类型」弹窗的「全部」快选不受影响（弹窗勾选场景一键全选仍有价值）

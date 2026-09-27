@@ -167,6 +167,9 @@ fun AppNav(pendingNavigation: MutableState<String?>) {
                 composable("Settings") { SettingsScreen { scope.launch { drawerState.open() } } }
                 composable("Pojie") { PojieScreen { scope.launch { drawerState.open() } } }
                 composable("Guard") { GuardScreen { scope.launch { drawerState.open() } } }
+                composable("NetLog") {
+                    com.wifi.toolbox.ui.screen.NetLogScreen { scope.launch { drawerState.open() } }
+                }
                 composable("Viewer") { ManageScreen { scope.launch { drawerState.open() } } }
                 composable("Test") { TestScreen(onMenuClick = { scope.launch { drawerState.open() } }) }
                 composable("About") { AboutScreen { scope.launch { drawerState.open() } } }
@@ -324,6 +327,10 @@ fun NavContent(
                     NavMenuItem(
                         context.getString(R.string.guard_name),
                         "Guard", Icons.Rounded.MonitorHeart
+                    ),
+                    NavMenuItem(
+                        context.getString(R.string.netlog_name),
+                        "NetLog", Icons.Rounded.ReceiptLong
                     ),
                     NavMenuItem(
                         context.getString(R.string.wifi_manager),

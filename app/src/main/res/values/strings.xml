@@ -735,4 +735,43 @@
     <string name="storage_clean_selected">清理所选</string>
     <string name="storage_clean_done">已清理 %1$s</string>
     <string name="storage_nothing">没有可清理的内容</string>
+
+    <!-- ==================== 网络日志（独立捕获功能） ==================== -->
+    <string name="netlog_name">网络日志</string>
+    <string name="netlog_tab_capture">捕获</string>
+    <string name="netlog_tab_sessions">会话</string>
+    <string name="netlog_recording">正在记录</string>
+    <string name="netlog_stopped">未在记录</string>
+    <string name="netlog_start">开始记录</string>
+    <string name="netlog_stop">停止记录</string>
+    <string name="netlog_snapshot_now">立即快照</string>
+    <string name="netlog_hint">开始记录后，链路事件、系统日志与状态快照将自动捕获</string>
+    <string name="netlog_duration_events">已记录 %1$s · 事件 %2$d</string>
+    <string name="netlog_channel_label">执行通道</string>
+    <string name="netlog_logcat_lines">日志行数</string>
+    <string name="netlog_log_capped">日志已达上限已停止（共 %1$d 行）</string>
+    <string name="netlog_live_preview">实时事件</string>
+    <string name="netlog_preview_empty">暂无事件，开始记录后此处显示实时时间线</string>
+    <string name="netlog_preview_count">事件 %1$d 条（显示最近 50 条）</string>
+    <string name="netlog_setting_syslog">捕获系统日志流</string>
+    <string name="netlog_setting_syslog_desc">logcat 网络标签过滤流（WifiService / ConnectivityService / NetworkMonitor 等），需 Shizuku 或 Root 才能读取系统日志</string>
+    <string name="netlog_setting_snapshot">事件触发快照</string>
+    <string name="netlog_setting_snapshot_desc">断链/恢复等事件发生时自动抓取 dumpsys 与接口状态存档</string>
+    <string name="netlog_setting_probe">主动探测时间线</string>
+    <string name="netlog_setting_probe_desc">每 15 秒 HTTP+DNS 轮询一次并记录结果（默认关闭）</string>
+    <string name="netlog_setting_keep">会话保留个数</string>
+    <string name="netlog_setting_keep_desc">超出自动清理最旧的会话</string>
+    <string name="netlog_setting_maxlog">单会话日志上限</string>
+    <string name="netlog_setting_maxlog_desc">日志流达到该大小后停止捕获（防止占满磁盘）</string>
+    <string name="netlog_unlimited">不限</string>
+    <string name="netlog_unit_sessions">个</string>
+    <string name="netlog_sessions_title">历史会话（%1$d）</string>
+    <string name="netlog_sessions_empty">暂无历史会话</string>
+    <string name="netlog_session_share">分享会话</string>
+    <string name="netlog_session_delete">删除会话</string>
+    <string name="netlog_notif_channel">网络日志</string>
+    <string name="netlog_notif_channel_desc">网络日志记录状态通知</string>
+    <string name="netlog_notif_title">网络日志记录中</string>
+    <string name="netlog_notif_text">事件 %1$d · 点击查看</string>
+    <string name="netlog_notif_stop">停止</string>
 </resources>
