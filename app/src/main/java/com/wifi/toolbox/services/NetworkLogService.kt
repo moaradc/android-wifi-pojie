@@ -19,6 +19,8 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.SystemClock
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.core.app.NotificationCompat
 import com.wifi.toolbox.R
 import com.wifi.toolbox.ToolboxApp
@@ -36,7 +38,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
-import rikka.shizuku.api.Shizuku
+import rikka.shizuku.Shizuku
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.InetAddress
@@ -357,21 +359,23 @@ class NetworkLogService : android.app.Service() {
                         val info = intent.getParcelableExtra<android.net.NetworkInfo>(
                             WifiManager.EXTRA_NETWORK_INFO
                         )
+                        // EXTRA_SUPPLICANT_STATE 是 @hide 常量（值 "supplicantState"），
+                        // 且 SupplicantState 是 Serializable（枚举）而非 Parcelable——
+                        // 官方文档 retrieval 方式即 getSerializableExtra
                         @Suppress("DEPRECATION")
-                        val supplicant = intent.getParcelableExtra<android.net.wifi.SupplicantState>(
-                            WifiManager.EXTRA_SUPPLICANT_STATE
-                        )
+                        val supplicant =
+                            intent.getSerializableExtra("supplicantState")
+                                as? android.net.wifi.SupplicantState
                         if (info?.state == android.net.NetworkInfo.State.CONNECTED) {
                             val ssid = cleanSsid(info.extraInfo)
                             timeline("wifi", "info", "NETWORK CONNECTED · SSID=$ssid")
                         } else if (info?.state == android.net.NetworkInfo.State.DISCONNECTED) {
                             timeline("wifi", "error", "NETWORK DISCONNECTED")
                             maybeSnapshot("wifi-disconnected")
-                        } else if (supplicant != null && supplicant.isValidState()) {
-                            // 只记握手关键步，防刷屏
-                            if (supplicant in SUPPLICANT_KEY_STATES) {
-                                timeline("wifi", "info", "supplicant=$supplicant")
-                            }
+                        } else if (supplicant in SUPPLICANT_KEY_STATES) {
+                            // 只记握手关键步，防刷屏（isValidState() 亦为 @hide，
+                            // 枚举反序列化产物必为合法常量，关键步集合已足够过滤）
+                            timeline("wifi", "info", "supplicant=$supplicant")
                         }
                     }
 
@@ -862,6 +866,12 @@ class NetworkLogService : android.app.Service() {
 
         private const val LOGCAT_BIN = "/system/bin/logcat"
 
+        /** logcat 断流重连初始退避（连续失败指数放大至上限，成功后回落） */
+        private const val LOGCAT_RECONNECT_MS = 3_000L
+
+        /** logcat 断流重连退避上限 */
+        private const val LOGCAT_MAX_RECONNECT_MS = 60_000L
+
         /** logcat 网络标签集（冒号 V = 全级别） */
         const val LOG_TAGS =
             "WifiService:V WifiClientModeImpl:V ClientModeImpl:V " +
@@ -882,7 +892,6 @@ class NetworkLogService : android.app.Service() {
         private const val SNAPSHOT_CMD_TIMEOUT_MS = 8_000L
         private const val SNAPSHOT_DEBOUNCE_MS = 5_000L
         private const val BOOT_CONTEXT_LINES = 800
-        private const val LOGCAT_MAX_RECONNECT_MS = 60_000L
         private const val PROBE_INTERVAL_MS = 15_000L
         private const val PROBE_HTTP_URL = "http://connect.rom.miui.com/generate_204"
         private const val PROBE_DNS_HOST = "www.baidu.com"

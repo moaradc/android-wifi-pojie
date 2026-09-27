@@ -152,14 +152,14 @@ private fun CapturePage(
             ) {
                 Column(Modifier.padding(16.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        // 录制指示灯
+                        // 录制指示灯（颜色在 Composable 上下文取好再传入：
+                        // Canvas 的 DrawScope 非组合上下文，不能读 MaterialTheme）
+                        val dotColor = if (running) Color(0xFFEF5350)
+                        else MaterialTheme.colorScheme.outlineVariant
                         androidx.compose.foundation.Canvas(
                             modifier = Modifier.size(12.dp)
                         ) {
-                            drawCircle(
-                                color = if (running) Color(0xFFEF5350)
-                                else MaterialTheme.colorScheme.outlineVariant
-                            )
+                            drawCircle(color = dotColor)
                         }
                         Spacer(Modifier.width(10.dp))
                         Column(Modifier.weight(1f)) {
@@ -201,7 +201,10 @@ private fun CapturePage(
                     )
 
                     // 统计行：通道 / 系统日志行数 / 封顶状态
-                    StatRow(stringResource(R.string.netlog_channel_label), channel.ifEmpty { "-" })
+                    StatRow(
+                        stringResource(R.string.netlog_channel_label),
+                        if (channel.isEmpty()) "-" else channel
+                    )
                     if (running) {
                         StatRow(
                             stringResource(R.string.netlog_logcat_lines),
